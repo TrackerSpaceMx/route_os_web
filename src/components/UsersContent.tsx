@@ -14,6 +14,8 @@ interface User {
   role: Role
   active: boolean
   createdAt: string
+  phone: string
+  recovery_email: string
 }
 
 interface UserForm {
@@ -139,6 +141,7 @@ export default function UsersContent() {
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [showPassword, setShowPassword] = useState(false)
+  const [sendInvitation, setSendInvitation] = useState(false)
 
   // ── Fetch ────────────────────────────────────────────────────────────────────
   const fetchUsers = async () => {
@@ -152,12 +155,14 @@ export default function UsersContent() {
       const json = await res.json()
       const raw: Record<string, unknown>[] = Array.isArray(json.data) ? json.data : []
       const normalized: User[] = raw.map((u, index) => ({
-        id:        index,
-        username:  String(u.username ?? 'Sin nombre'),
-        email:     String(u.email ?? ''),
-        role:      String(u.role ?? 'monitoring') as Role,
-        active:    u.status === 1,
-        createdAt: String(u.created_at ?? ''),
+        id:             index,
+        username:       String(u.username ?? 'Sin nombre'),
+        email:          String(u.email ?? ''),
+        role:           String(u.role ?? 'monitoring') as Role,
+        active:         u.status === 1,
+        createdAt:      String(u.created_at ?? ''),
+        phone:          String(u.phone ?? ''),
+        recovery_email: String(u.recovery_email ?? ''),
       }))
       setUsers(normalized)
     } catch (e: unknown) {
@@ -218,18 +223,19 @@ const filtered = useMemo(() => {
     setFormError(null)
     setSelected(null)
     setShowPassword(false)
+    setSendInvitation(false)
     setModal('create')
   }
   const openEdit = (user: User) => {
     setSelected(user)
     setForm({
-      name: user.username,
-      username: user.username,
-      email: user.email,
-      phone: '',
-      password_hash: '',
-      recovery_email: '',
-      role: user.role,
+      name:           user.username,
+      username:       user.username,
+      email:          user.email,
+      phone:          user.phone,
+      password_hash:  '',
+      recovery_email: user.recovery_email,
+      role:           user.role,
     })
     setFormError(null)
     setShowPassword(false)
@@ -256,7 +262,7 @@ const filtered = useMemo(() => {
         const res = await fetch(`${API}/users`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify(form),
+          body: JSON.stringify({ ...form, send_invitation: sendInvitation }),
         })
         if (!res.ok) throw new Error('No se pudo crear el usuario')
       } else if (modal === 'edit' && selected) {
@@ -518,6 +524,21 @@ const filtered = useMemo(() => {
                 <p className={styles.lockedHint}>El rol de administrador no puede modificarse.</p>
               )}
             </div>
+
+            {modal === 'create' && (
+              <div className={styles.formGroup} style={{ flexDirection: 'row', alignItems: 'center', gap: '8px' }}>
+                <input
+                  type="checkbox"
+                  id="sendInvitation"
+                  checked={sendInvitation}
+                  onChange={e => setSendInvitation(e.target.checked)}
+                  style={{ width: 'auto', cursor: 'pointer' }}
+                />
+                <label htmlFor="sendInvitation" className={styles.label} style={{ margin: 0, cursor: 'pointer' }}>
+                  Enviar invitación por correo
+                </label>
+              </div>
+            )}
 
             {formError && <p className={styles.errorMsg}>{formError}</p>}
 
