@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '../context/AuthContext'
+import EyeIcon from './EyeIcon'
 import styles from './UsersContent.module.css'
+
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type Role = 'admin' | 'monitoring' | 'conductor'
@@ -134,6 +136,9 @@ export default function UsersContent() {
   const [form,       setForm]       = useState<UserForm>(EMPTY_FORM)
   const [formError,  setFormError]  = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [toast, setToast] = useState<string | null>(null)
+  const [showPassword, setShowPassword] = useState(false)
 
   // ── Fetch ────────────────────────────────────────────────────────────────────
   const fetchUsers = async () => {
@@ -186,6 +191,12 @@ const filtered = useMemo(() => {
 
   useEffect(() => { setPage(1) }, [search])
 
+  // ── Toast ────────────────────────────────────────────────────────────────────
+  const showToast = (msg: string) => {
+    setToast(msg)
+    setTimeout(() => setToast(null), 3000)
+  }
+
   // ── Toggle status ────────────────────────────────────────────────────────────
   const handleToggle = async (user: User) => {
     const updated = { ...user, active: !user.active }
@@ -206,6 +217,7 @@ const filtered = useMemo(() => {
     setForm(EMPTY_FORM)
     setFormError(null)
     setSelected(null)
+    setShowPassword(false)
     setModal('create')
   }
   const openEdit = (user: User) => {
@@ -220,10 +232,11 @@ const filtered = useMemo(() => {
       role: user.role,
     })
     setFormError(null)
+    setShowPassword(false)
     setModal('edit')
   }
-  const openDelete = (user: User) => { setSelected(user); setModal('delete') }
-  const closeModal = () => { setModal('none'); setSelected(null) }
+  const openDelete = (user: User) => { setSelected(user); setDeleteError(null); setModal('delete') }
+  const closeModal = () => { setModal('none'); setSelected(null); setShowPassword(false) }
 
   // ── Submit ───────────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
@@ -247,17 +260,23 @@ const filtered = useMemo(() => {
         })
         if (!res.ok) throw new Error('No se pudo crear el usuario')
       } else if (modal === 'edit' && selected) {
-        const payload: Partial<UserForm> = {
-          name: form.name,
-          username: form.username,
-          email: form.email,
-          phone: form.phone,
-          recovery_email: form.recovery_email,
-          role: form.role,
+        const payload: Partial<UserForm> = {}
+
+        if (form.name          !== selected.username)     payload.name           = form.name
+        if (form.username      !== selected.username)     payload.username       = form.username
+        if (form.email         !== selected.email)        payload.email          = form.email
+        if (form.role          !== selected.role)         payload.role           = form.role
+        if (form.phone.trim())                            payload.phone          = form.phone
+        if (form.recovery_email.trim())                   payload.recovery_email = form.recovery_email
+        if (form.password_hash.trim())                    payload.password_hash  = form.password_hash
+
+        if (Object.keys(payload).length === 0) {
+          closeModal()
+          return
         }
-        if (form.password_hash.trim()) payload.password_hash = form.password_hash
+
         const res = await fetch(`${API}/users/${selected.username}`, {
-          method: 'PUT',
+          method: 'PATCH',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: JSON.stringify(payload),
         })
@@ -276,15 +295,22 @@ const filtered = useMemo(() => {
   const handleDelete = async () => {
     if (!selected) return
     setSubmitting(true)
+    setDeleteError(null)
     try {
-      await fetch(`${API}/users/${selected.username}`, {
+      const res = await fetch(`${API}/users/${selected.username}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       })
+      if (res.status === 403) {
+        setDeleteError('Este usuario es el dueño de la cuenta y no puede eliminarse.')
+        return
+      }
+      if (!res.ok) throw new Error('No se pudo eliminar el usuario')
       await fetchUsers()
       closeModal()
+      showToast('Usuario eliminado correctamente')
     } catch {
-      closeModal()
+      setDeleteError('Ocurrió un error al intentar eliminar el usuario.')
     } finally {
       setSubmitting(false)
     }
@@ -385,11 +411,10 @@ const filtered = useMemo(() => {
                         <IconEdit />
                       </button>
                       <button
-                        className={`${styles.btnIcon} ${styles.btnIconDanger}`}
-                        onClick={() => openDelete(user)}
-                        title={user.role === 'admin' ? 'No se puede eliminar un administrador' : 'Eliminar'}
-                        disabled={user.role === 'admin'}
-                      >
+                          className={`${styles.btnIcon} ${styles.btnIconDanger}`}
+                          onClick={() => openDelete(user)}
+                          title="Eliminar"
+                        >
                         <IconTrash />
                       </button>
                     </div>
@@ -418,14 +443,14 @@ const filtered = useMemo(() => {
 
             <div className={styles.formGroup}>
               <label className={styles.label}>Nombre completo</label>
-              <input className={styles.input} type="text" placeholder="Diego Argueta"
+              <input className={styles.input} type="text" placeholder="Nombre del usuario"
                 value={form.name}
                 onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
             </div>
 
             <div className={styles.formGroup}>
               <label className={styles.label}>Nombre de usuario</label>
-              <input className={styles.input} type="text" placeholder="argueta777"
+              <input className={styles.input} type="text" placeholder="Username"
                 value={form.username}
                 onChange={e => setForm(f => ({ ...f, username: e.target.value }))} />
             </div>
@@ -455,9 +480,29 @@ const filtered = useMemo(() => {
               <label className={styles.label}>
                 {modal === 'edit' ? 'Contraseña (dejar vacío para no cambiar)' : 'Contraseña'}
               </label>
-              <input className={styles.input} type="password" placeholder="••••••••"
-                value={form.password_hash}
-                onChange={e => setForm(f => ({ ...f, password_hash: e.target.value }))} />
+              <div style={{ position: 'relative' }}>
+                <input
+                  className={styles.input}
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="••••••••"
+                  value={form.password_hash}
+                  onChange={e => setForm(f => ({ ...f, password_hash: e.target.value }))}
+                  style={{ paddingRight: '36px' }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(v => !v)}
+                  tabIndex={-1}
+                  style={{
+                    position: 'absolute', right: '10px', top: '50%',
+                    transform: 'translateY(-50%)', background: 'none',
+                    border: 'none', cursor: 'pointer', padding: 0,
+                    display: 'flex', alignItems: 'center',
+                  }}
+                >
+                  <EyeIcon visible={showPassword} />
+                </button>
+              </div>
             </div>
 
             <div className={styles.formGroup}>
@@ -495,13 +540,28 @@ const filtered = useMemo(() => {
               ¿Estás seguro de que deseas eliminar a <strong>{selected.username}</strong>?
               Esta acción no se puede deshacer.
             </p>
+            {deleteError && <p className={styles.errorMsg}>{deleteError}</p>}
             <div className={styles.modalActions}>
               <button className={styles.btnCancel} onClick={closeModal}>Cancelar</button>
-              <button className={styles.btnDelete} onClick={handleDelete} disabled={submitting}>
+              <button className={styles.btnDelete} onClick={handleDelete} disabled={submitting || !!deleteError}>
                 {submitting ? 'Eliminando...' : 'Eliminar'}
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ── Toast ── */}
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: '24px', right: '24px',
+          background: '#22c55e', color: '#fff',
+          padding: '12px 20px', borderRadius: '8px',
+          fontWeight: 500, fontSize: '14px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          zIndex: 9999,
+        }}>
+          ✓ {toast}
         </div>
       )}
     </>
