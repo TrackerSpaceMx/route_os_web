@@ -193,6 +193,13 @@
   padding: 32px;
 }
 
+.contentFull {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  padding: 0;
+}
+
 /* ── Home ─────────────────────────────────────────────────────────────────── */
 .homeContent {
   display: flex;
