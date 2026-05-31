@@ -108,6 +108,7 @@ function HomeContent() {
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface Waypoint {
   id: number
+  point_id?: string
   name: string
   address: string
   lat: number
@@ -146,7 +147,7 @@ function RouteConfigContent() {
   interface VehicleData { plate: string; driver: string }
   const [vehicles,    setVehicles]    = useState<VehicleData[]>([])
   const [loadingVeh,  setLoadingVeh]  = useState(false)
-  interface PointData { id: number; point_name: string; category: string; coordinates: [number, number]; radius: number }
+  interface PointData { id: number; point_id: string; point_name: string; category: string; coordinates: [number, number]; radius: number }
   const [points,      setPoints]      = useState<PointData[]>([])
   const [pointSearch, setPointSearch] = useState('')
   const [showDropdown, setShowDropdown] = useState(false)
@@ -190,6 +191,7 @@ function RouteConfigContent() {
     const id = nextId; setNextId(n => n + 1)
     const wp: Waypoint = {
       id, lat: p.coordinates[0], lng: p.coordinates[1],
+      point_id: p.point_id,
       name: p.point_name,
       address: `${p.category} · r=${p.radius}m`,
       arrival: '', dwell: '',
@@ -270,6 +272,43 @@ function RouteConfigContent() {
   }
 
   const clearAll = () => { setWaypoints([]); setNextId(1); setExpanded(null) }
+
+  const DAY_MAP = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday']
+  const [saving,    setSaving]    = useState(false)
+  const [saveMsg,   setSaveMsg]   = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+
+  const saveRoute = async () => {
+    if (!routeName.trim())        return setSaveMsg({ type: 'err', text: 'Escribe un nombre para la ruta.' })
+    if (!vehicle)                 return setSaveMsg({ type: 'err', text: 'Selecciona un vehículo.' })
+    if (waypoints.length < 2)     return setSaveMsg({ type: 'err', text: 'Agrega al menos 2 puntos.' })
+    if (activeDays.length === 0)  return setSaveMsg({ type: 'err', text: 'Selecciona al menos un día activo.' })
+
+    const body = {
+      vehicle,
+      driver: operator || customOp || 'Sin operador',
+      route_name: routeName.trim(),
+      active_days: activeDays.sort((a,b) => a-b).map(i => DAY_MAP[i]),
+      points: waypoints.map(w => ({ id: w.id, point_id: w.point_id ?? null, point_name: w.name, dwell_time: w.dwell ? parseInt(w.dwell) : 0 })),
+    }
+
+    setSaving(true)
+    setSaveMsg(null)
+    try {
+      const res = await fetch(`${API}/routes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      })
+      if (res.status === 409) throw new Error('Ya existe una ruta con ese nombre.')
+      if (!res.ok) throw new Error(`Error al guardar (${res.status})`)
+      setSaveMsg({ type: 'ok', text: '¡Ruta guardada correctamente!' })
+      setTimeout(() => { clearAll(); setRouteName(''); setVehicle(''); setOperator(''); setCustomOp(''); setActiveDays([0,1,2,3,4]); setSaveMsg(null) }, 1800)
+    } catch (e: any) {
+      setSaveMsg({ type: 'err', text: e.message ?? 'Error al guardar la ruta.' })
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const polyline: [number, number][] = waypoints.map(w => [w.lat, w.lng])
 
@@ -485,10 +524,17 @@ function RouteConfigContent() {
         </div>
 
         {/* Footer actions */}
+        {saveMsg && (
+          <div className={saveMsg.type === 'ok' ? rcStyles.alertOk : rcStyles.alertErr}>
+            <span className={rcStyles.alertIcon}>{saveMsg.type === 'ok' ? '✓' : '⚠'}</span>
+            {saveMsg.text}
+          </div>
+        )}
         <div className={rcStyles.actions}>
-          <button className={rcStyles.btnClear} onClick={clearAll}>Clear</button>
-          <button className={rcStyles.btnPreview}>Preview</button>
-          <button className={rcStyles.btnSave}>Save Route</button>
+          <button className={rcStyles.btnClear} onClick={clearAll}>Limpiar</button>
+          <button className={rcStyles.btnSave} onClick={saveRoute} disabled={saving}>
+            {saving ? 'Guardando…' : 'Guardar ruta'}
+          </button>
         </div>
       </aside>
 

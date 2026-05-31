@@ -765,3 +765,52 @@
   border-color: #38BDF8 !important;
   color: #38BDF8 !important;
 }
+
+/* ── Save feedback ────────────────────────────────────────────────────────── */
+.msgOk {
+  font-size: 11px;
+  color: #22c55e;
+  font-weight: 600;
+  flex: 1;
+}
+
+.msgErr {
+  font-size: 11px;
+  color: #f87171;
+  font-weight: 600;
+  flex: 1;
+}
+
+/* ── Alert banners ────────────────────────────────────────────────────────── */
+.alertOk {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 20px 0;
+  padding: 10px 14px;
+  background: #14532d55;
+  border: 1px solid #22c55e66;
+  border-radius: 8px;
+  color: #4ade80;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.alertErr {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 20px 0;
+  padding: 10px 14px;
+  background: #450a0a55;
+  border: 1px solid #f8717166;
+  border-radius: 8px;
+  color: #fca5a5;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.alertIcon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
