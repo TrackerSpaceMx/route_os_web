@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import UsersContent from '../components/UsersContent'
 import PointsContent from '../components/PointsContent'
+import DriversContent from '../components/DriversContent'
 import { MapContainer, TileLayer, Marker, Polyline, useMapEvents, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import styles from './IndexPage.module.css'
@@ -63,6 +64,13 @@ const IconPoints = () => (
     <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" fill="currentColor"/>
   </svg>
 )
+const IconDrivers = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+    <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2"/>
+    <circle cx="12" cy="12" r="3" fill="currentColor"/>
+    <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+  </svg>
+)
 const IconBell = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
     <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
@@ -76,7 +84,7 @@ const IconSearch = () => (
 )
 
 // ── Tipos ──────────────────────────────────────────────────────────────────────
-type View = 'home' | 'route-config' | 'my-routes' | 'live-tracking' | 'users' | 'points' | 'customization' | 'settings'
+type View = 'home' | 'route-config' | 'my-routes' | 'live-tracking' | 'users' | 'drivers' | 'points' | 'customization' | 'settings'
 
 // ── Contenidos de cada vista ───────────────────────────────────────────────────
 function HomeContent() {
@@ -147,6 +155,9 @@ function RouteConfigContent() {
   interface VehicleData { plate: string; driver: string }
   const [vehicles,    setVehicles]    = useState<VehicleData[]>([])
   const [loadingVeh,  setLoadingVeh]  = useState(false)
+  interface DriverData { id: number; name: string }
+  const [driversList,    setDriversList]    = useState<DriverData[]>([])
+  const [loadingDrivers, setLoadingDrivers] = useState(false)
   interface PointData { id: number; point_id: string; point_name: string; category: string; coordinates: [number, number]; radius: number }
   const [points,      setPoints]      = useState<PointData[]>([])
   const [pointSearch, setPointSearch] = useState('')
@@ -162,6 +173,7 @@ function RouteConfigContent() {
   const [nextId,    setNextId]        = useState(1)
   const [expanded,  setExpanded]      = useState<number | null>(null)
   const [addSearch, setAddSearch]     = useState('')
+  const [addSearchError, setAddSearchError] = useState<string | null>(null)
   const [adding,    setAdding]        = useState(false)
   const addInputRef = useRef<HTMLInputElement>(null)
 
@@ -173,6 +185,16 @@ function RouteConfigContent() {
       .then(setVehicles)
       .catch(() => {})
       .finally(() => setLoadingVeh(false))
+  }, [token])
+
+  // Load drivers
+  useEffect(() => {
+    setLoadingDrivers(true)
+    fetch(`${API}/drivers`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.status === 204 ? { data: [] } : r.json())
+      .then((d: { data: DriverData[] }) => setDriversList(d.data ?? []))
+      .catch(() => {})
+      .finally(() => setLoadingDrivers(false))
   }, [token])
 
   // Load existing points
@@ -188,6 +210,11 @@ function RouteConfigContent() {
   )
 
   const addPointAsWaypoint = (p: PointData) => {
+    if (waypoints.some(w => w.point_id === p.point_id)) {
+      setPointSearch('')
+      setShowDropdown(false)
+      return
+    }
     const id = nextId; setNextId(n => n + 1)
     const wp: Waypoint = {
       id, lat: p.coordinates[0], lng: p.coordinates[1],
@@ -251,7 +278,32 @@ function RouteConfigContent() {
     if (!addSearch.trim()) return
     setAdding(true)
     try {
-      const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(addSearch)}&format=json&limit=1&countrycodes=mx`, { headers: { 'Accept-Language': 'es' } })
+      // Detectar si es coordenadas: "19.4326, -99.1332" o "19.4326 -99.1332"
+      const coordMatch = addSearch.trim().match(/^(-?\d+\.?\d*)[,\s]+(-?\d+\.?\d*)$/)
+      if (coordMatch) {
+        const lat = parseFloat(coordMatch[1])
+        const lng = parseFloat(coordMatch[2])
+        if (!isNaN(lat) && !isNaN(lng)) {
+          const id = nextId; setNextId(n => n + 1)
+          const wp: Waypoint = {
+            id, lat, lng,
+            name: waypoints.length === 0 ? 'Punto de inicio' : `Waypoint ${id}`,
+            address: `${lat.toFixed(6)}, ${lng.toFixed(6)}`,
+            arrival: '', dwell: '',
+            isStart: waypoints.length === 0,
+          }
+          setWaypoints(w => [...w, wp])
+          setFlyTo([lat, lng])
+          setExpanded(id)
+          setAddSearch('')
+          return
+        }
+      }
+      // Búsqueda por dirección con Nominatim
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(addSearch)}&format=json&limit=5&countrycodes=mx`,
+        { headers: { 'Accept-Language': 'es' } }
+      )
       const data = await res.json()
       if (data.length) {
         const lat = parseFloat(data[0].lat), lng = parseFloat(data[0].lon)
@@ -267,6 +319,9 @@ function RouteConfigContent() {
         setFlyTo([lat, lng])
         setExpanded(id)
         setAddSearch('')
+      } else {
+        setAddSearchError('No se encontró la dirección')
+        setTimeout(() => setAddSearchError(null), 3000)
       }
     } finally { setAdding(false) }
   }
@@ -367,21 +422,19 @@ function RouteConfigContent() {
             </div>
             <div className={rcStyles.field}>
               <label className={rcStyles.label}>Operador</label>
-              {operator ? (
-                <div className={rcStyles.operatorFilled}>
-                  <span className={rcStyles.operatorName}>{operator}</span>
-                  <button className={rcStyles.operatorClear} onClick={() => setOperator('')} title="Cambiar">✕</button>
-                </div>
-              ) : (
-                <div className={rcStyles.operatorWrap}>
-                  <input
-                    className={rcStyles.input}
-                    placeholder="Sin operador"
-                    value={customOp}
-                    onChange={e => setCustomOp(e.target.value)}
-                  />
-                </div>
-              )}
+              <div className={rcStyles.selectWrap}>
+                <select
+                  className={rcStyles.select}
+                  value={operator}
+                  onChange={e => { setOperator(e.target.value); setCustomOp(e.target.value) }}
+                  disabled={loadingDrivers}
+                >
+                  <option value="">{loadingDrivers ? 'Cargando...' : 'Sin operador'}</option>
+                  {driversList.map(d => (
+                    <option key={d.id} value={d.name}>{d.name}</option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
 
@@ -411,6 +464,49 @@ function RouteConfigContent() {
             </div>
           </div>
 
+          {/* Barra de búsqueda en modo dibujar */}
+          {routeMode === 'draw' && (
+            <div className={rcStyles.field}>
+              <label className={rcStyles.label}>Buscar dirección o coordenadas</label>
+              <div className={rcStyles.comboWrap}>
+                <div className={rcStyles.comboInputRow}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className={rcStyles.comboIcon}>
+                    <circle cx="11" cy="11" r="8" stroke="currentColor" strokeWidth="2"/>
+                    <path d="M21 21l-4.35-4.35" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                  </svg>
+                  <input
+                    ref={addInputRef}
+                    className={rcStyles.comboInput}
+                    placeholder="Ej: Av. Insurgentes Sur 123 o 19.4326, -99.1332"
+                    value={addSearch}
+                    onChange={e => { setAddSearch(e.target.value); setAddSearchError(null) }}
+                    onKeyDown={e => e.key === 'Enter' && handleAddSearch()}
+                  />
+                  {addSearch && (
+                    <button className={rcStyles.comboClear} onClick={() => { setAddSearch(''); setAddSearchError(null) }}>✕</button>
+                  )}
+                </div>
+                <button
+                  className={rcStyles.btnSearchAddr}
+                  onClick={handleAddSearch}
+                  disabled={adding || !addSearch.trim()}
+                >
+                  {adding ? (
+                    <span className={rcStyles.spinnerSm} />
+                  ) : (
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+                      <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" fill="currentColor"/>
+                    </svg>
+                  )}
+                  {adding ? 'Buscando...' : 'Agregar punto'}
+                </button>
+                {addSearchError && (
+                  <div className={rcStyles.comboEmpty}>{addSearchError}</div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Combobox puntos existentes */}
           {routeMode === 'search' && (
             <div className={rcStyles.field}>
@@ -436,22 +532,39 @@ function RouteConfigContent() {
                 </div>
                 {showDropdown && filteredPoints.length > 0 && (
                   <div className={rcStyles.comboDropdown}>
-                    {filteredPoints.map(p => (
-                      <button key={p.id} className={rcStyles.comboItem} onMouseDown={() => addPointAsWaypoint(p)}>
-                        <div className={rcStyles.comboItemIcon}>
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-                            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" fill="currentColor"/>
-                          </svg>
-                        </div>
-                        <div className={rcStyles.comboItemInfo}>
-                          <span className={rcStyles.comboItemName}>{p.point_name}</span>
-                          <span className={rcStyles.comboItemMeta}>{p.category} · r={p.radius}m</span>
-                        </div>
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" className={rcStyles.comboItemAdd}>
-                          <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/>
-                        </svg>
-                      </button>
-                    ))}
+                    {filteredPoints.map(p => {
+                      const alreadyAdded = waypoints.some(w => w.point_id === p.point_id)
+                      return (
+                        <button
+                          key={p.id}
+                          className={rcStyles.comboItem}
+                          onMouseDown={() => !alreadyAdded && addPointAsWaypoint(p)}
+                          disabled={alreadyAdded}
+                          style={alreadyAdded ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}
+                        >
+                          <div className={rcStyles.comboItemIcon}>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                              <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" fill="currentColor"/>
+                            </svg>
+                          </div>
+                          <div className={rcStyles.comboItemInfo}>
+                            <span className={rcStyles.comboItemName}>{p.point_name}</span>
+                            <span className={rcStyles.comboItemMeta}>
+                              {p.category} · r={p.radius}m{alreadyAdded ? ' · Ya agregado' : ''}
+                            </span>
+                          </div>
+                          {alreadyAdded ? (
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                              <path d="M20 6L9 17l-5-5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+                            </svg>
+                          ) : (
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" className={rcStyles.comboItemAdd}>
+                              <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/>
+                            </svg>
+                          )}
+                        </button>
+                      )
+                    })}
                   </div>
                 )}
                 {showDropdown && pointSearch && filteredPoints.length === 0 && (
@@ -654,6 +767,9 @@ export default function IndexPage() {
           <button className={`${styles.navItem} ${activeView === 'users' ? styles.navActive : ''}`} onClick={() => navTo('users')}>
             <IconUsers /><span>Usuarios</span>
           </button>
+          <button className={`${styles.navItem} ${activeView === 'drivers' ? styles.navActive : ''}`} onClick={() => navTo('drivers')}>
+            <IconDrivers /><span>Conductores</span>
+          </button>
           <button className={`${styles.navItem} ${activeView === 'points' ? styles.navActive : ''}`} onClick={() => navTo('points')}>
             <IconPoints /><span>Puntos de interés</span>
           </button>
@@ -697,6 +813,7 @@ export default function IndexPage() {
           {activeView === 'my-routes'     && <PlaceholderContent title="My Routes" />}
           {activeView === 'live-tracking' && <PlaceholderContent title="Live Tracking" />}
           {activeView === 'users'         && <UsersContent />}
+          {activeView === 'drivers'       && <DriversContent />}
           {activeView === 'points'        && <PointsContent />}
           {activeView === 'customization' && <PlaceholderContent title="Customization" />}
           {activeView === 'settings'      && <PlaceholderContent title="Settings" />}
