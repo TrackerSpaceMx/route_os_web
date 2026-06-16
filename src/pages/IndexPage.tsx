@@ -329,26 +329,133 @@ function RouteConfigContent() {
   const clearAll = () => { setWaypoints([]); setNextId(1); setExpanded(null) }
 
   const DAY_MAP = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday']
-  const [saving,    setSaving]    = useState(false)
   const [saveMsg,   setSaveMsg]   = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
 
-  const saveRoute = async () => {
+  // ── Finalizar ruta (popup) ───────────────────────────────────────────────
+  const POINT_CATEGORIES = [
+    { value: 'airport',   label: 'Aeropuerto'  },
+    { value: 'station',   label: 'Estación'    },
+    { value: 'terminal',  label: 'Terminal'    },
+    { value: 'warehouse', label: 'Almacén'     },
+    { value: 'stop',      label: 'Parada'      },
+    { value: 'other',     label: 'Otro'        },
+  ]
+
+  interface FinalizeRow {
+    id: number
+    name: string
+    arrival: string
+    dwell: string
+    lat: number
+    lng: number
+    point_id?: string
+    isNew: boolean
+    category: string
+    radius: string
+  }
+
+  const [showFinalize,   setShowFinalize]   = useState(false)
+  const [finalizeRows,   setFinalizeRows]   = useState<FinalizeRow[]>([])
+  const [finalizing,     setFinalizing]     = useState(false)
+  const [finalizeError,  setFinalizeError]  = useState<string | null>(null)
+
+  const openFinalize = () => {
     if (!routeName.trim())        return setSaveMsg({ type: 'err', text: 'Escribe un nombre para la ruta.' })
     if (!vehicle)                 return setSaveMsg({ type: 'err', text: 'Selecciona un vehículo.' })
     if (waypoints.length < 2)     return setSaveMsg({ type: 'err', text: 'Agrega al menos 2 puntos.' })
     if (activeDays.length === 0)  return setSaveMsg({ type: 'err', text: 'Selecciona al menos un día activo.' })
 
-    const body = {
-      vehicle,
-      driver: operator || customOp || 'Sin operador',
-      route_name: routeName.trim(),
-      active_days: activeDays.sort((a,b) => a-b).map(i => DAY_MAP[i]),
-      points: waypoints.map(w => ({ id: w.id, point_id: w.point_id ?? null, point_name: w.name, dwell_time: w.dwell ? parseInt(w.dwell) : 0 })),
+    setSaveMsg(null)
+    setFinalizeError(null)
+    setFinalizeRows(waypoints.map(w => ({
+      id: w.id,
+      name: w.name,
+      arrival: w.arrival,
+      dwell: w.dwell,
+      lat: w.lat,
+      lng: w.lng,
+      point_id: w.point_id,
+      isNew: !w.point_id,
+      category: 'stop',
+      radius: '100',
+    })))
+    setShowFinalize(true)
+  }
+
+  const updateFinalizeRow = (id: number, field: keyof FinalizeRow, value: string) => {
+    setFinalizeRows(rows => rows.map(r => r.id === id ? { ...r, [field]: value } : r))
+  }
+
+  const confirmFinalize = async () => {
+    for (const r of finalizeRows) {
+      if (!r.name.trim()) {
+        setFinalizeError('Todos los puntos deben tener un nombre.')
+        return
+      }
+      if (r.isNew && (!r.radius.trim() || isNaN(Number(r.radius)) || Number(r.radius) <= 0)) {
+        setFinalizeError('El radio de los puntos nuevos debe ser un número mayor a 0.')
+        return
+      }
     }
 
-    setSaving(true)
-    setSaveMsg(null)
+    setFinalizing(true)
+    setFinalizeError(null)
+
     try {
+      const resolvedPoints: { id: number; point_id: string | null; point_name: string; dwell_time: number }[] = []
+
+      for (const r of finalizeRows) {
+        let pid: string | null = r.point_id ?? null
+
+        if (r.isNew) {
+          const res = await fetch(`${API}/points`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({
+              point_name:   r.name.trim(),
+              category:     r.category,
+              latidude:     String(r.lat),
+              longitude:    String(r.lng),
+              radius_meter: Number(r.radius),
+            }),
+          })
+          if (!res.ok) throw new Error(`No se pudo crear el punto "${r.name}".`)
+
+          const created = await res.json().catch(() => null) as { data?: { point_id?: string }; point_id?: string } | null
+          pid = created?.data?.point_id ?? created?.point_id ?? null
+
+          if (!pid) {
+            // Fallback: el endpoint no devolvió el punto creado, lo buscamos por nombre + coordenadas
+            const listRes = await fetch(`${API}/points`, { headers: { Authorization: `Bearer ${token}` } })
+            const listJson: { data?: Record<string, unknown>[] } = listRes.status === 204 ? { data: [] } : await listRes.json()
+            const match = (listJson.data ?? []).find(p =>
+              p.point_name === r.name.trim() &&
+              Array.isArray(p.coordinates) &&
+              Math.abs(Number((p.coordinates as number[])[0]) - r.lat) < 0.001 &&
+              Math.abs(Number((p.coordinates as number[])[1]) - r.lng) < 0.001
+            )
+            pid = (match?.point_id as string | undefined) ?? null
+          }
+
+          if (!pid) throw new Error(`El punto "${r.name}" se creó, pero no se pudo enlazar a la ruta.`)
+        }
+
+        resolvedPoints.push({
+          id: r.id,
+          point_id: pid,
+          point_name: r.name.trim(),
+          dwell_time: r.dwell ? parseInt(r.dwell) : 0,
+        })
+      }
+
+      const body = {
+        vehicle,
+        driver: operator || customOp || 'Sin operador',
+        route_name: routeName.trim(),
+        active_days: activeDays.sort((a,b) => a-b).map(i => DAY_MAP[i]),
+        points: resolvedPoints,
+      }
+
       const res = await fetch(`${API}/routes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -356,12 +463,14 @@ function RouteConfigContent() {
       })
       if (res.status === 409) throw new Error('Ya existe una ruta con ese nombre.')
       if (!res.ok) throw new Error(`Error al guardar (${res.status})`)
+
+      setShowFinalize(false)
       setSaveMsg({ type: 'ok', text: '¡Ruta guardada correctamente!' })
       setTimeout(() => { clearAll(); setRouteName(''); setVehicle(''); setOperator(''); setCustomOp(''); setActiveDays([0,1,2,3,4]); setSaveMsg(null) }, 1800)
     } catch (e: any) {
-      setSaveMsg({ type: 'err', text: e.message ?? 'Error al guardar la ruta.' })
+      setFinalizeError(e.message ?? 'Error al guardar la ruta.')
     } finally {
-      setSaving(false)
+      setFinalizing(false)
     }
   }
 
@@ -645,8 +754,8 @@ function RouteConfigContent() {
         )}
         <div className={rcStyles.actions}>
           <button className={rcStyles.btnClear} onClick={clearAll}>Limpiar</button>
-          <button className={rcStyles.btnSave} onClick={saveRoute} disabled={saving}>
-            {saving ? 'Guardando…' : 'Guardar ruta'}
+          <button className={rcStyles.btnSave} onClick={openFinalize}>
+            Guardar ruta
           </button>
         </div>
       </aside>
@@ -719,6 +828,111 @@ function RouteConfigContent() {
           </div>
         )}
       </div>
+
+      {/* ── Popup: finalizar ruta ── */}
+      {showFinalize && (
+        <div className={rcStyles.finalizeOverlay}>
+          <div className={rcStyles.finalizeModal}>
+            <div className={rcStyles.finalizeHeader}>
+              <h3 className={rcStyles.finalizeTitle}>Finalizar ruta</h3>
+              <p className={rcStyles.finalizeSubtitle}>
+                Asigna nombre, hora de llegada y permanencia a cada punto antes de guardar la ruta.
+                Los puntos nuevos (dibujados o buscados) se guardarán también como puntos de interés reutilizables.
+              </p>
+            </div>
+
+            <div className={rcStyles.finalizeBody}>
+              {finalizeRows.map((r, idx) => (
+                <div key={r.id} className={rcStyles.finalizeRow}>
+                  <div className={rcStyles.finalizeRowTop}>
+                    <div className={rcStyles.wpBadge}>{idx + 1}</div>
+                    <span className={r.isNew ? rcStyles.finalizeTagNew : rcStyles.finalizeTagExisting}>
+                      {r.isNew ? 'Punto nuevo' : 'Punto existente'}
+                    </span>
+                  </div>
+
+                  <div className={rcStyles.field}>
+                    <label className={rcStyles.labelSm}>Nombre</label>
+                    <input
+                      className={rcStyles.inputSm}
+                      value={r.name}
+                      onChange={e => updateFinalizeRow(r.id, 'name', e.target.value)}
+                      placeholder="Nombre del punto"
+                    />
+                  </div>
+
+                  {r.isNew && (
+                    <div className={rcStyles.row}>
+                      <div className={rcStyles.field}>
+                        <label className={rcStyles.labelSm}>Categoría</label>
+                        <div className={rcStyles.selectWrap}>
+                          <select
+                            className={rcStyles.select}
+                            value={r.category}
+                            onChange={e => updateFinalizeRow(r.id, 'category', e.target.value)}
+                          >
+                            {POINT_CATEGORIES.map(c => (
+                              <option key={c.value} value={c.value}>{c.label}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                      <div className={rcStyles.field}>
+                        <label className={rcStyles.labelSm}>Radio (m)</label>
+                        <input
+                          className={rcStyles.inputSm}
+                          type="number"
+                          min="1"
+                          value={r.radius}
+                          onChange={e => updateFinalizeRow(r.id, 'radius', e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div className={rcStyles.row}>
+                    <div className={rcStyles.field}>
+                      <label className={rcStyles.labelSm}>Hora de llegada</label>
+                      <input
+                        className={rcStyles.inputSm}
+                        type="time"
+                        value={r.arrival}
+                        onChange={e => updateFinalizeRow(r.id, 'arrival', e.target.value)}
+                      />
+                    </div>
+                    <div className={rcStyles.field}>
+                      <label className={rcStyles.labelSm}>Permanencia (min)</label>
+                      <input
+                        className={rcStyles.inputSm}
+                        type="number"
+                        min="0"
+                        placeholder="0"
+                        value={r.dwell}
+                        onChange={e => updateFinalizeRow(r.id, 'dwell', e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {finalizeError && (
+              <div className={rcStyles.finalizeErr}>
+                <span className={rcStyles.alertIcon}>⚠</span>{finalizeError}
+              </div>
+            )}
+
+            <div className={rcStyles.finalizeActions}>
+              <button className={rcStyles.finalizeBtnCancel} onClick={() => setShowFinalize(false)} disabled={finalizing}>
+                Cancelar
+              </button>
+              <button className={rcStyles.finalizeBtnConfirm} onClick={confirmFinalize} disabled={finalizing}>
+                {finalizing ? 'Guardando…' : 'Confirmar y guardar ruta'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
