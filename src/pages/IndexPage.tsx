@@ -8,7 +8,10 @@ import { MapContainer, TileLayer, Marker, Polyline, useMapEvents, useMap } from 
 import L from 'leaflet'
 import styles from './IndexPage.module.css'
 import rcStyles from './RouteConfig.module.css'
+import listStyles from '../components/UsersContent.module.css'
 import 'leaflet/dist/leaflet.css';
+
+const API = 'http://localhost:8084'
 
 // Fix leaflet icons
 delete (L.Icon.Default.prototype as any)._getIconUrl
@@ -34,6 +37,14 @@ const IconTracking = () => (
     <circle cx="12" cy="12" r="3" fill="currentColor"/>
     <path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
     <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.5"/>
+  </svg>
+)
+const IconTripAssign = () => (
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+    <rect x="3" y="7" width="13" height="11" rx="2" stroke="currentColor" strokeWidth="2"/>
+    <path d="M16 10h3.5l2.5 3v5h-6" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/>
+    <circle cx="7.5" cy="18.5" r="1.8" stroke="currentColor" strokeWidth="1.8"/>
+    <circle cx="17.5" cy="18.5" r="1.8" stroke="currentColor" strokeWidth="1.8"/>
   </svg>
 )
 const IconUsers = () => (
@@ -84,7 +95,7 @@ const IconSearch = () => (
 )
 
 // ── Tipos ──────────────────────────────────────────────────────────────────────
-type View = 'home' | 'route-config' | 'my-routes' | 'live-tracking' | 'users' | 'drivers' | 'points' | 'customization' | 'settings'
+type View = 'home' | 'route-config' | 'my-routes' | 'trip-assignment' | 'live-tracking' | 'users' | 'drivers' | 'points' | 'customization' | 'settings'
 
 // ── Contenidos de cada vista ───────────────────────────────────────────────────
 function HomeContent() {
@@ -121,8 +132,6 @@ interface Waypoint {
   address: string
   lat: number
   lng: number
-  arrival: string
-  dwell: string
   isStart?: boolean
 }
 
@@ -146,27 +155,292 @@ const numberedIcon = (n: number) =>
     html: `<div style="width:28px;height:28px;border-radius:50%;background:#0d1117;border:2px solid #94a3b8;color:#f1f5f9;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.5)">${n}</div>`,
   })
 
+// ── MyRoutesContent ────────────────────────────────────────────────────────────
+interface RouteSummary {
+  route_id: string
+  route_name: string
+  creation_date: string
+  created_by: string
+}
+
+function formatRouteDate(iso: string | null | undefined) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return '—'
+  return d.toLocaleDateString('es-MX', {
+    month: 'short', day: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  })
+}
+
+function routeInitials(name: string) { return name.slice(0, 2).toUpperCase() }
+
+const IconPlus = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+    <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/>
+  </svg>
+)
+
+const IconEye = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round"/>
+    <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.8"/>
+  </svg>
+)
+
+const IconTrash = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+    <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6h16Z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+)
+
+interface WaypointSummary {
+  waypoint_id: string
+  route_id: string
+  waypoint_order: number
+  waypoint_label: string
+}
+
+function MyRoutesContent({ onCreateNew, reloadToken, isAdmin }: { onCreateNew: () => void; reloadToken: number; isAdmin: boolean }) {
+  const { token } = useAuth()
+  const [routes,  setRoutes]  = useState<RouteSummary[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error,   setError]   = useState<string | null>(null)
+  const [search,  setSearch]  = useState('')
+
+  const [viewRoute,        setViewRoute]        = useState<RouteSummary | null>(null)
+  const [waypoints,        setWaypoints]        = useState<WaypointSummary[]>([])
+  const [waypointsLoading, setWaypointsLoading] = useState(false)
+  const [waypointsError,   setWaypointsError]   = useState<string | null>(null)
+
+  const [deleteRoute,   setDeleteRoute]   = useState<RouteSummary | null>(null)
+  const [deleting,      setDeleting]      = useState(false)
+  const [deleteError,   setDeleteError]   = useState<string | null>(null)
+
+  const fetchRoutes = async () => {
+    setLoading(true); setError(null)
+    try {
+      const res = await fetch(`${API}/routes`, { headers: { Authorization: `Bearer ${token}` } })
+      if (res.status === 204) { setRoutes([]); return }
+      if (!res.ok) throw new Error('Error al cargar las rutas')
+      const json = await res.json()
+      setRoutes(Array.isArray(json.data) ? json.data : [])
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Error desconocido')
+    } finally { setLoading(false) }
+  }
+
+  useEffect(() => { fetchRoutes() }, [token, reloadToken]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const openWaypoints = async (route: RouteSummary) => {
+    setViewRoute(route)
+    setWaypoints([])
+    setWaypointsError(null)
+    setWaypointsLoading(true)
+    try {
+      const res = await fetch(`${API}/routes/waypoints/${route.route_id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (res.status === 204) { setWaypoints([]); return }
+      if (!res.ok) throw new Error('Error al cargar los puntos de la ruta')
+      const json = await res.json()
+      const data: WaypointSummary[] = Array.isArray(json.data) ? json.data : []
+      setWaypoints(data.sort((a, b) => a.waypoint_order - b.waypoint_order))
+    } catch (e: unknown) {
+      setWaypointsError(e instanceof Error ? e.message : 'Error desconocido')
+    } finally {
+      setWaypointsLoading(false)
+    }
+  }
+
+  const closeWaypoints = () => { setViewRoute(null); setWaypoints([]); setWaypointsError(null) }
+
+  const openDeleteRoute = (route: RouteSummary) => {
+    setDeleteRoute(route)
+    setDeleteError(null)
+  }
+  const closeDeleteRoute = () => { setDeleteRoute(null); setDeleteError(null) }
+
+  const confirmDeleteRoute = async () => {
+    if (!deleteRoute) return
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      const res = await fetch(`${API}/routes/${deleteRoute.route_id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) throw new Error('No se pudo eliminar la ruta')
+      setRoutes(rs => rs.filter(r => r.route_id !== deleteRoute.route_id))
+      setDeleteRoute(null)
+    } catch (e: unknown) {
+      setDeleteError(e instanceof Error ? e.message : 'Error desconocido')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const filtered = routes
+    .filter(r =>
+      r.route_name.toLowerCase().includes(search.toLowerCase()) ||
+      r.created_by.toLowerCase().includes(search.toLowerCase())
+    )
+    .sort((a, b) => new Date(b.creation_date).getTime() - new Date(a.creation_date).getTime())
+
+  return (
+    <>
+      <div className={listStyles.header}>
+        <div className={listStyles.headerLeft}>
+          <h2>Mis Rutas</h2>
+          <p>Administra las rutas configuradas para tu flotilla</p>
+        </div>
+        {isAdmin && (
+          <button className={listStyles.btnAdd} onClick={onCreateNew}>
+            <IconPlus /> Agregar Ruta
+          </button>
+        )}
+      </div>
+
+      <div className={listStyles.card}>
+        <div className={listStyles.toolbar}>
+          <div className={listStyles.searchWrap}>
+            <IconSearch />
+            <input
+              className={listStyles.searchInput}
+              type="text"
+              placeholder="Buscar rutas..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </div>
+          <span className={listStyles.showingText}>
+            Mostrando {filtered.length} {filtered.length === 1 ? 'ruta' : 'rutas'}
+          </span>
+        </div>
+
+        <table className={listStyles.table}>
+          <thead>
+            <tr>
+              <th>Nombre</th><th>Creado por</th><th>Fecha de creación</th><th>Ver puntos de la ruta</th>
+              {isAdmin && <th>Eliminar</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr className={listStyles.stateRow}><td colSpan={isAdmin ? 5 : 4}><span className={listStyles.spinner} />Cargando rutas...</td></tr>
+            ) : error ? (
+              <tr className={listStyles.stateRow}><td colSpan={isAdmin ? 5 : 4}>⚠️ {error}</td></tr>
+            ) : filtered.length === 0 ? (
+              <tr className={listStyles.stateRow}><td colSpan={isAdmin ? 5 : 4}>{isAdmin ? 'No se encontraron rutas. Crea la primera con "Agregar Ruta".' : 'No se encontraron rutas.'}</td></tr>
+            ) : filtered.map(route => (
+              <tr key={route.route_id}>
+                <td>
+                  <div className={listStyles.userCell}>
+                    <div className={listStyles.avatar}>{routeInitials(route.route_name)}</div>
+                    <div className={listStyles.userNameText}>{route.route_name}</div>
+                  </div>
+                </td>
+                <td>{route.created_by}</td>
+                <td>{formatRouteDate(route.creation_date)}</td>
+                <td>
+                  <div className={listStyles.actions}>
+                    <button className={listStyles.btnIcon} onClick={() => openWaypoints(route)} title="Ver puntos">
+                      <IconEye />
+                    </button>
+                  </div>
+                </td>
+                {isAdmin && (
+                  <td>
+                    <div className={listStyles.actions}>
+                      <button className={`${listStyles.btnIcon} ${listStyles.btnIconDanger}`}
+                        onClick={() => openDeleteRoute(route)} title="Eliminar ruta">
+                        <IconTrash />
+                      </button>
+                    </div>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {deleteRoute && (
+        <div className={listStyles.overlay} onClick={closeDeleteRoute}>
+          <div className={listStyles.modal} onClick={e => e.stopPropagation()}>
+            <h3 className={listStyles.modalTitle}>Eliminar ruta</h3>
+            <p className={listStyles.deleteWarning}>
+              ¿Seguro que quieres eliminar la ruta <strong>{deleteRoute.route_name}</strong>? Esta acción no se puede deshacer.
+            </p>
+            {deleteError && <p className={listStyles.errorMsg}>⚠️ {deleteError}</p>}
+            <div className={listStyles.modalActions}>
+              <button className={listStyles.btnCancel} onClick={closeDeleteRoute} disabled={deleting}>Cancelar</button>
+              <button className={listStyles.btnDelete} onClick={confirmDeleteRoute} disabled={deleting}>
+                {deleting ? 'Eliminando...' : 'Eliminar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {viewRoute && (
+        <div className={listStyles.overlay} onClick={closeWaypoints}>
+          <div className={listStyles.modal} onClick={e => e.stopPropagation()}>
+            <h3 className={listStyles.modalTitle}>Puntos de "{viewRoute.route_name}"</h3>
+
+            {waypointsLoading ? (
+              <div className={listStyles.stateRow}><span className={listStyles.spinner} />Cargando puntos...</div>
+            ) : waypointsError ? (
+              <p className={listStyles.errorMsg}>⚠️ {waypointsError}</p>
+            ) : waypoints.length === 0 ? (
+              <p className={listStyles.errorMsg}>Esta ruta no tiene puntos registrados.</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '360px', overflowY: 'auto' }}>
+                {waypoints.map(wp => (
+                  <div
+                    key={wp.waypoint_id}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '12px',
+                      padding: '10px 12px', background: '#161c28',
+                      border: '1px solid #1e2a3a', borderRadius: '8px',
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: '26px', height: '26px', borderRadius: '50%',
+                        background: '#0f2233', color: '#38BDF8', fontSize: '12px', fontWeight: 700,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                      }}
+                    >
+                      {wp.waypoint_order}
+                    </div>
+                    <span style={{ color: '#f1f5f9', fontSize: '13.5px' }}>{wp.waypoint_label}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className={listStyles.modalActions}>
+              <button className={listStyles.btnCancel} onClick={closeWaypoints}>Cerrar</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
 // ── RouteConfigContent ─────────────────────────────────────────────────────────
-function RouteConfigContent() {
+function RouteConfigContent({ onSaved }: { onSaved: () => void }) {
   const CDMX: [number, number] = [19.4326, -99.1332]
   const { token } = useAuth()
-  const API = 'http://localhost:8084'
 
-  interface VehicleData { plate: string; driver: string }
-  const [vehicles,    setVehicles]    = useState<VehicleData[]>([])
-  const [loadingVeh,  setLoadingVeh]  = useState(false)
-  interface DriverData { id: number; name: string }
-  const [driversList,    setDriversList]    = useState<DriverData[]>([])
-  const [loadingDrivers, setLoadingDrivers] = useState(false)
   interface PointData { id: number; point_id: string; point_name: string; category: string; coordinates: [number, number]; radius: number }
   const [points,      setPoints]      = useState<PointData[]>([])
   const [pointSearch, setPointSearch] = useState('')
   const [showDropdown, setShowDropdown] = useState(false)
   const [routeName,   setRouteName]   = useState('')
   const [activeDays,  setActiveDays]  = useState<number[]>([0,1,2,3,4])
-  const [vehicle,     setVehicle]     = useState('')
-  const [operator,    setOperator]    = useState('')
-  const [customOp,    setCustomOp]    = useState('')
   const [routeMode,   setRouteMode]   = useState<'search' | 'draw'>('draw')
   const [waypoints, setWaypoints]     = useState<Waypoint[]>([])
   const [flyTo,     setFlyTo]         = useState<[number, number] | null>(null)
@@ -176,26 +450,6 @@ function RouteConfigContent() {
   const [addSearchError, setAddSearchError] = useState<string | null>(null)
   const [adding,    setAdding]        = useState(false)
   const addInputRef = useRef<HTMLInputElement>(null)
-
-  // Load vehicles
-  useEffect(() => {
-    setLoadingVeh(true)
-    fetch(`${API}/vehicles`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.status === 204 ? [] : r.json().then((d: { data: VehicleData[] }) => d.data ?? []))
-      .then(setVehicles)
-      .catch(() => {})
-      .finally(() => setLoadingVeh(false))
-  }, [token])
-
-  // Load drivers
-  useEffect(() => {
-    setLoadingDrivers(true)
-    fetch(`${API}/drivers`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.status === 204 ? { data: [] } : r.json())
-      .then((d: { data: DriverData[] }) => setDriversList(d.data ?? []))
-      .catch(() => {})
-      .finally(() => setLoadingDrivers(false))
-  }, [token])
 
   // Load existing points
   useEffect(() => {
@@ -221,7 +475,6 @@ function RouteConfigContent() {
       point_id: p.point_id,
       name: p.point_name,
       address: `${p.category} · r=${p.radius}m`,
-      arrival: '', dwell: '',
       isStart: waypoints.length === 0,
     }
     setWaypoints(w => [...w, wp])
@@ -229,19 +482,6 @@ function RouteConfigContent() {
     setExpanded(id)
     setPointSearch('')
     setShowDropdown(false)
-  }
-
-  // Auto-fill operator when vehicle changes
-  const handleVehicleChange = (plate: string) => {
-    setVehicle(plate)
-    const found = vehicles.find(v => v.plate === plate)
-    if (found && found.driver !== 'Sin conductor asignado') {
-      setOperator(found.driver)
-      setCustomOp('')
-    } else {
-      setOperator('')
-      setCustomOp('')
-    }
   }
 
   // Total stats
@@ -252,13 +492,17 @@ function RouteConfigContent() {
 
   const handleMapClick = (lat: number, lng: number) => {
     if (routeMode !== 'draw') return
+    if (!routeName.trim()) {
+      setSaveMsg({ type: 'err', text: 'Escribe el nombre de la ruta antes de dibujar puntos.' })
+      return
+    }
+    setSaveMsg(null)
     const id = nextId
     setNextId(n => n + 1)
     const wp: Waypoint = {
       id, lat, lng,
-      name: waypoints.length === 0 ? 'Punto de inicio' : `Waypoint ${id}`,
+      name: `${routeName.trim()}${id}`,
       address: `${lat.toFixed(4)}, ${lng.toFixed(4)}`,
-      arrival: '', dwell: '',
       isStart: waypoints.length === 0,
     }
     setWaypoints(w => [...w, wp])
@@ -268,10 +512,6 @@ function RouteConfigContent() {
   const removeWaypoint = (id: number) => {
     setWaypoints(w => w.filter(p => p.id !== id))
     if (expanded === id) setExpanded(null)
-  }
-
-  const updateWaypoint = (id: number, field: keyof Waypoint, val: string) => {
-    setWaypoints(w => w.map(p => p.id === id ? { ...p, [field]: val } : p))
   }
 
   const handleAddSearch = async () => {
@@ -284,12 +524,16 @@ function RouteConfigContent() {
         const lat = parseFloat(coordMatch[1])
         const lng = parseFloat(coordMatch[2])
         if (!isNaN(lat) && !isNaN(lng)) {
+          if (!routeName.trim()) {
+            setSaveMsg({ type: 'err', text: 'Escribe el nombre de la ruta antes de agregar puntos.' })
+            setAdding(false)
+            return
+          }
           const id = nextId; setNextId(n => n + 1)
           const wp: Waypoint = {
             id, lat, lng,
-            name: waypoints.length === 0 ? 'Punto de inicio' : `Waypoint ${id}`,
+            name: `${routeName.trim()}${id}`,
             address: `${lat.toFixed(6)}, ${lng.toFixed(6)}`,
-            arrival: '', dwell: '',
             isStart: waypoints.length === 0,
           }
           setWaypoints(w => [...w, wp])
@@ -312,7 +556,6 @@ function RouteConfigContent() {
           id, lat, lng,
           name: data[0].display_name.split(',')[0],
           address: data[0].display_name.split(',').slice(0, 2).join(','),
-          arrival: '', dwell: '',
           isStart: waypoints.length === 0,
         }
         setWaypoints(w => [...w, wp])
@@ -344,8 +587,6 @@ function RouteConfigContent() {
   interface FinalizeRow {
     id: number
     name: string
-    arrival: string
-    dwell: string
     lat: number
     lng: number
     point_id?: string
@@ -361,7 +602,6 @@ function RouteConfigContent() {
 
   const openFinalize = () => {
     if (!routeName.trim())        return setSaveMsg({ type: 'err', text: 'Escribe un nombre para la ruta.' })
-    if (!vehicle)                 return setSaveMsg({ type: 'err', text: 'Selecciona un vehículo.' })
     if (waypoints.length < 2)     return setSaveMsg({ type: 'err', text: 'Agrega al menos 2 puntos.' })
     if (activeDays.length === 0)  return setSaveMsg({ type: 'err', text: 'Selecciona al menos un día activo.' })
 
@@ -370,8 +610,6 @@ function RouteConfigContent() {
     setFinalizeRows(waypoints.map(w => ({
       id: w.id,
       name: w.name,
-      arrival: w.arrival,
-      dwell: w.dwell,
       lat: w.lat,
       lng: w.lng,
       point_id: w.point_id,
@@ -402,7 +640,7 @@ function RouteConfigContent() {
     setFinalizeError(null)
 
     try {
-      const resolvedPoints: { id: number; point_id: string | null; point_name: string; dwell_time: number }[] = []
+      const resolvedPoints: { id: number; point_id: string | null; point_name: string }[] = []
 
       for (const r of finalizeRows) {
         let pid: string | null = r.point_id ?? null
@@ -419,7 +657,12 @@ function RouteConfigContent() {
               radius_meter: Number(r.radius),
             }),
           })
-          if (!res.ok) throw new Error(`No se pudo crear el punto "${r.name}".`)
+          if (!res.ok) {
+            if (res.status === 409) {
+              throw new Error(`El punto "${r.name}" ya existe. Elige otro nombre y vuelve a intentarlo.`)
+            }
+            throw new Error(`No se pudo crear el punto "${r.name}" (código ${res.status}).`)
+          }
 
           const created = await res.json().catch(() => null) as { data?: { point_id?: string }; point_id?: string } | null
           pid = created?.data?.point_id ?? created?.point_id ?? null
@@ -444,13 +687,10 @@ function RouteConfigContent() {
           id: r.id,
           point_id: pid,
           point_name: r.name.trim(),
-          dwell_time: r.dwell ? parseInt(r.dwell) : 0,
         })
       }
 
       const body = {
-        vehicle,
-        driver: operator || customOp || 'Sin operador',
         route_name: routeName.trim(),
         active_days: activeDays.sort((a,b) => a-b).map(i => DAY_MAP[i]),
         points: resolvedPoints,
@@ -461,12 +701,12 @@ function RouteConfigContent() {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(body),
       })
-      if (res.status === 409) throw new Error('Ya existe una ruta con ese nombre.')
+      if (res.status === 409) throw new Error(`Ya existe una ruta llamada "${routeName.trim()}". Elige otro nombre y vuelve a intentarlo.`)
       if (!res.ok) throw new Error(`Error al guardar (${res.status})`)
 
       setShowFinalize(false)
       setSaveMsg({ type: 'ok', text: '¡Ruta guardada correctamente!' })
-      setTimeout(() => { clearAll(); setRouteName(''); setVehicle(''); setOperator(''); setCustomOp(''); setActiveDays([0,1,2,3,4]); setSaveMsg(null) }, 1800)
+      setTimeout(() => { clearAll(); setRouteName(''); setActiveDays([0,1,2,3,4]); setSaveMsg(null); onSaved() }, 1800)
     } catch (e: any) {
       setFinalizeError(e.message ?? 'Error al guardar la ruta.')
     } finally {
@@ -513,37 +753,6 @@ function RouteConfigContent() {
                   {d}
                 </button>
               ))}
-            </div>
-          </div>
-
-          {/* Vehicle + Operator */}
-          <div className={rcStyles.row}>
-            <div className={rcStyles.field}>
-              <label className={rcStyles.label}>Vehículo</label>
-              <div className={rcStyles.selectWrap}>
-                <select className={rcStyles.select} value={vehicle} onChange={e => handleVehicleChange(e.target.value)} disabled={loadingVeh}>
-                  <option value="">{loadingVeh ? 'Cargando...' : 'Seleccionar'}</option>
-                  {vehicles.map(v => (
-                    <option key={v.plate} value={v.plate}>{v.plate.trim()}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div className={rcStyles.field}>
-              <label className={rcStyles.label}>Operador</label>
-              <div className={rcStyles.selectWrap}>
-                <select
-                  className={rcStyles.select}
-                  value={operator}
-                  onChange={e => { setOperator(e.target.value); setCustomOp(e.target.value) }}
-                  disabled={loadingDrivers}
-                >
-                  <option value="">{loadingDrivers ? 'Cargando...' : 'Sin operador'}</option>
-                  {driversList.map(d => (
-                    <option key={d.id} value={d.name}>{d.name}</option>
-                  ))}
-                </select>
-              </div>
             </div>
           </div>
 
@@ -721,16 +930,6 @@ function RouteConfigContent() {
                 </div>
                 {expanded === wp.id && (
                   <div className={rcStyles.wpDetails}>
-                    <div className={rcStyles.row}>
-                      <div className={rcStyles.field}>
-                        <label className={rcStyles.labelSm}>Arrival</label>
-                        <input className={rcStyles.inputSm} type="time" value={wp.arrival} onChange={e => updateWaypoint(wp.id, 'arrival', e.target.value)} />
-                      </div>
-                      <div className={rcStyles.field}>
-                        <label className={rcStyles.labelSm}>Dwell (min)</label>
-                        <input className={rcStyles.inputSm} type="number" min="0" placeholder="0" value={wp.dwell} onChange={e => updateWaypoint(wp.id, 'dwell', e.target.value)} />
-                      </div>
-                    </div>
                     <div className={rcStyles.wpCoords}>{wp.lat.toFixed(6)}, {wp.lng.toFixed(6)}</div>
                   </div>
                 )}
@@ -836,7 +1035,7 @@ function RouteConfigContent() {
             <div className={rcStyles.finalizeHeader}>
               <h3 className={rcStyles.finalizeTitle}>Finalizar ruta</h3>
               <p className={rcStyles.finalizeSubtitle}>
-                Asigna nombre, hora de llegada y permanencia a cada punto antes de guardar la ruta.
+                Asigna un nombre a cada punto antes de guardar la ruta.
                 Los puntos nuevos (dibujados o buscados) se guardarán también como puntos de interés reutilizables.
               </p>
             </div>
@@ -889,29 +1088,6 @@ function RouteConfigContent() {
                       </div>
                     </div>
                   )}
-
-                  <div className={rcStyles.row}>
-                    <div className={rcStyles.field}>
-                      <label className={rcStyles.labelSm}>Hora de llegada</label>
-                      <input
-                        className={rcStyles.inputSm}
-                        type="time"
-                        value={r.arrival}
-                        onChange={e => updateFinalizeRow(r.id, 'arrival', e.target.value)}
-                      />
-                    </div>
-                    <div className={rcStyles.field}>
-                      <label className={rcStyles.labelSm}>Permanencia (min)</label>
-                      <input
-                        className={rcStyles.inputSm}
-                        type="number"
-                        min="0"
-                        placeholder="0"
-                        value={r.dwell}
-                        onChange={e => updateFinalizeRow(r.id, 'dwell', e.target.value)}
-                      />
-                    </div>
-                  </div>
                 </div>
               ))}
             </div>
@@ -950,7 +1126,9 @@ function PlaceholderContent({ title }: { title: string }) {
 export default function IndexPage() {
   const { logout, user } = useAuth()
   const navigate = useNavigate()
-  const [activeView, setActiveView] = useState<View>('home')
+  const [activeView, setActiveView] = useState<View>('my-routes')
+  const [routesReloadToken, setRoutesReloadToken] = useState(0)
+  const isAdmin = user?.role === 'admin'
 
   const displayName = user?.username ?? 'Usuario'
   const displayRole = user?.role ?? ''
@@ -968,12 +1146,17 @@ export default function IndexPage() {
         </div>
 
         <nav className={styles.nav}>
-          <button className={`${styles.navItem} ${activeView === 'route-config' ? styles.navActive : ''}`} onClick={() => navTo('route-config')}>
-            <IconRoute /><span>Crear Rutas</span>
-          </button>
+          {isAdmin && (
+            <button className={`${styles.navItem} ${activeView === 'route-config' ? styles.navActive : ''}`} onClick={() => navTo('route-config')}>
+              <IconRoute /><span>Crear Rutas</span>
+            </button>
+          )}
 
           <button className={`${styles.navItem} ${activeView === 'my-routes' ? styles.navActive : ''}`} onClick={() => navTo('my-routes')}>
-            <IconList /><span>My Routes</span>
+            <IconList /><span>Mis Rutas</span>
+          </button>
+          <button className={`${styles.navItem} ${activeView === 'trip-assignment' ? styles.navActive : ''}`} onClick={() => navTo('trip-assignment')}>
+            <IconTripAssign /><span>Asignación de Viajes</span>
           </button>
           <button className={`${styles.navItem} ${activeView === 'live-tracking' ? styles.navActive : ''}`} onClick={() => navTo('live-tracking')}>
             <IconTracking /><span>Live Tracking</span>
@@ -1023,8 +1206,19 @@ export default function IndexPage() {
         {/* Content */}
         <main className={activeView === 'route-config' ? styles.contentFull : styles.content}>
           {activeView === 'home'          && <HomeContent />}
-          {activeView === 'route-config'  && <RouteConfigContent />}
-          {activeView === 'my-routes'     && <PlaceholderContent title="My Routes" />}
+          {activeView === 'route-config' && isAdmin && (
+            <RouteConfigContent
+              onSaved={() => { setRoutesReloadToken(n => n + 1); navTo('my-routes') }}
+            />
+          )}
+          {activeView === 'my-routes'     && (
+            <MyRoutesContent
+              onCreateNew={() => navTo('route-config')}
+              reloadToken={routesReloadToken}
+              isAdmin={isAdmin}
+            />
+          )}
+          {activeView === 'trip-assignment' && <PlaceholderContent title="Asignación de Viajes" />}
           {activeView === 'live-tracking' && <PlaceholderContent title="Live Tracking" />}
           {activeView === 'users'         && <UsersContent />}
           {activeView === 'drivers'       && <DriversContent />}

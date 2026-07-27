@@ -18,6 +18,7 @@ type Category = 'airport' | 'station' | 'terminal' | 'warehouse' | 'stop' | 'oth
 
 interface Point {
   id: number
+  point_id: string
   point_name: string
   category: Category
   lat: number
@@ -156,6 +157,7 @@ export default function PointsContent() {
       const raw: Record<string, unknown>[] = Array.isArray(json.data) ? json.data : []
       setPoints(raw.map(p => ({
         id:         Number(p.id),
+        point_id:   String(p.point_id ?? ''),
         point_name: String(p.point_name ?? ''),
         category:   String(p.category ?? 'other') as Category,
         lat:        Array.isArray(p.coordinates) ? Number(p.coordinates[0]) : 0,
@@ -243,12 +245,27 @@ export default function PointsContent() {
     if (!selected) return
     setSubmitting(true); setDeleteError(null)
     try {
-      const res = await fetch(`${API}/points/${selected.id}`, {
+      const res = await fetch(`${API}/points/${selected.point_id}`, {
         method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
       })
-      if (!res.ok) throw new Error('No se pudo eliminar el punto')
+      if (!res.ok) {
+        if (res.status === 409) {
+          const errJson = await res.json().catch(() => null) as { detail?: { message?: string } } | null
+          const raw = errJson?.detail?.message ?? ''
+          const match = raw.match(/route:\s*(.+)$/i)
+          const routeName = match ? match[1].trim() : null
+          throw new Error(
+            routeName
+              ? `No se puede eliminar. El punto "${selected.point_name}" está en uso por la ruta "${routeName}".`
+              : `No se puede eliminar. El punto "${selected.point_name}" está en uso por una ruta.`
+          )
+        }
+        throw new Error('No se pudo eliminar el punto')
+      }
       await fetchPoints(); closeModal(); showToast('Punto de interés eliminado correctamente')
-    } catch { setDeleteError('Ocurrió un error al intentar eliminar el punto.') }
+    } catch (e: unknown) {
+      setDeleteError(e instanceof Error ? e.message : 'Ocurrió un error al intentar eliminar el punto.')
+    }
     finally { setSubmitting(false) }
   }
 
