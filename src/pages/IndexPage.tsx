@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import UsersContent from '../components/UsersContent'
 import PointsContent from '../components/PointsContent'
 import DriversContent from '../components/DriversContent'
+import TripAssignmentContent from '../components/TripAssignmentContent'
 import { MapContainer, TileLayer, Marker, Polyline, useMapEvents, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import styles from './IndexPage.module.css'
@@ -1218,7 +1219,7 @@ export default function IndexPage() {
               isAdmin={isAdmin}
             />
           )}
-          {activeView === 'trip-assignment' && <PlaceholderContent title="Asignación de Viajes" />}
+          {activeView === 'trip-assignment' && <TripAssignmentContent />}
           {activeView === 'live-tracking' && <PlaceholderContent title="Live Tracking" />}
           {activeView === 'users'         && <UsersContent />}
           {activeView === 'drivers'       && <DriversContent />}

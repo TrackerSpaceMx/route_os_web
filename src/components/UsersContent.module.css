@@ -146,6 +146,12 @@
 .badgeOperador  { background: #0f2233; color: #38BDF8; border-color: #1e3a5f; }
 .badgeConductor { background: #162313; color: #86efac; border-color: #1a3320; }
 
+/* ── Status badge (trips) ─────────────────────────────────────────────────── */
+.badgeScheduled  { background: #0f2233; color: #38BDF8; border-color: #1e3a5f; }
+.badgeInProgress { background: #2b2308; color: #facc15; border-color: #3f3410; }
+.badgeCompleted  { background: #162313; color: #86efac; border-color: #1a3320; }
+.badgeCancelled  { background: #2a1414; color: #f87171; border-color: #3a1c1c; }
+
 /* ── Toggle switch ────────────────────────────────────────────────────────── */
 .toggle {
   position: relative;
@@ -354,4 +360,3 @@
   color: #94a3b8;
   font-style: italic;
 }
-
