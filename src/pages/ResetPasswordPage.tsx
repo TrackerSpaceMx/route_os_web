@@ -76,7 +76,7 @@ export default function ResetPasswordPage() {
 
               <h2 className={styles.title}>Nueva contraseña</h2>
               <p className={styles.subtitle}>
-                Ingresa el token que recibiste y tu nueva contraseña.
+                Ingresa tu nueva contraseña.
               </p>
 
 

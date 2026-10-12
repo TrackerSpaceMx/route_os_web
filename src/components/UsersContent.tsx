@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '../context/AuthContext'
 import EyeIcon from './EyeIcon'
-import styles from './UsersContent.module.css'
+import m from './UsersModal.module.css'        // modales de usuarios
+import ui from './UsersView.module.css'        // vista de lista de usuarios
 
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -14,6 +15,7 @@ interface User {
   role: Role
   active: boolean
   createdAt: string
+  lastAccess: string
   phone: string
   recovery_email: string
 }
@@ -28,6 +30,11 @@ interface UserForm {
   role: Role
 }
 
+interface Client {
+  id: string
+  name: string
+}
+
 const EMPTY_FORM: UserForm = {
   name: '',
   username: '',
@@ -37,6 +44,8 @@ const EMPTY_FORM: UserForm = {
   recovery_email: '',
   role: 'monitoring',
 }
+
+type RoleFilter = 'all' | Role
 
 const API = 'http://localhost:8084'
 const PAGE_SIZE = 8
@@ -58,66 +67,110 @@ function translateRole(role: Role) {
 }
 
 // ── Icons ──────────────────────────────────────────────────────────────────────
+const svgProps = {
+  width: 17, height: 17, viewBox: '0 0 24 24', fill: 'none',
+  stroke: 'currentColor', strokeWidth: 1.8,
+  strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const,
+  'aria-hidden': true,
+}
 const IconSearch = () => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-    <circle cx="11" cy="11" r="8" stroke="currentColor" strokeWidth="2"/>
-    <path d="m21 21-4.35-4.35" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+  <svg {...svgProps} width={16} height={16}>
+    <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
   </svg>
 )
 const IconEdit = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+  <svg {...svgProps}>
+    <path d="M17 3a2.85 2.85 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+  </svg>
+)
+const IconKey = () => (
+  <svg {...svgProps}>
+    <circle cx="7.5" cy="15.5" r="4.5" />
+    <path d="m10.7 12.3 9.8-9.8M16 7l3 3M14 9l2 2" />
+  </svg>
+)
+const IconUserX = () => (
+  <svg {...svgProps}>
+    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+    <circle cx="9" cy="7" r="4" />
+    <path d="m17 8 5 5M22 8l-5 5" />
+  </svg>
+)
+const IconUserCheck = () => (
+  <svg {...svgProps}>
+    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+    <circle cx="9" cy="7" r="4" />
+    <path d="m16 11 2 2 4-4" />
+  </svg>
+)
+const IconUserPlus = () => (
+  <svg {...svgProps} width={18} height={18}>
+    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+    <circle cx="9" cy="7" r="4" />
+    <path d="M19 8v6M22 11h-6" />
+  </svg>
+)
+const IconClose = () => (
+  <svg {...svgProps} width={20} height={20}><path d="M18 6 6 18M6 6l12 12" /></svg>
+)
+const IconMail = () => (
+  <svg {...svgProps}>
+    <rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" />
+  </svg>
+)
+const IconSave = () => (
+  <svg {...svgProps}>
+    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+    <path d="M17 21v-8H7v8M7 3v5h8" />
   </svg>
 )
 const IconTrash = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-    <polyline points="3 6 5 6 21 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-    <path d="M10 11v6M14 11v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-    <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-  </svg>
-)
-const IconPlus = () => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-    <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/>
-  </svg>
-)
-const IconAdmin = () => (
-  <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
-    <path d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.35C17.25 22.15 21 17.25 21 12V7L12 2z" fill="currentColor"/>
-  </svg>
-)
-const IconUser = () => (
-  <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
-    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-    <circle cx="12" cy="7" r="4" stroke="currentColor" strokeWidth="2"/>
+  <svg {...svgProps}>
+    <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6" />
   </svg>
 )
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
+const ROLE_HINTS: Record<string, string> = {
+  admin:      'Acceso completo a la plataforma y gestión de usuarios',
+  monitoring: 'Monitorea viajes en vivo y atiende alertas',
+  operator:   'Opera rutas y viajes asignados',
+}
+
+// Contraseña temporal aleatoria: se usa cuando el usuario define la suya mediante la invitación
+function tempPassword() {
+  const bytes = new Uint8Array(18)
+  crypto.getRandomValues(bytes)
+  return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('')
+}
+
 function initials(name: string) {
   return name.slice(0, 2).toUpperCase()
 }
 
-function formatDate(iso: string | null | undefined) {
-  if (!iso) return '—'
+// "Hoy, 07:42" · "Ayer, 19:25" · "28 sep 2026, 16:03"
+function formatDate(iso: string | null | undefined,empty = '—') {
+  if (!iso) return empty
   const d = new Date(iso)
-  if (isNaN(d.getTime())) return '—'
-  return d.toLocaleDateString('en-US', {
-    month: 'short', day: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit', hour12: false,
-  })
+  if (isNaN(d.getTime())) return empty
+
+  const startOfDay = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
+  const diffDays = Math.round((startOfDay(new Date()) - startOfDay(d)) / 86_400_000)
+  const time = d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false })
+
+  if (diffDays === 0) return `Hoy, ${time}`
+  if (diffDays === 1) return `Ayer, ${time}`
+  const date = d
+    .toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })
+    .replace(/\./g, '')
+  return `${date}, ${time}`
 }
 
-function roleBadgeClass(role: Role) {
-  if (role === 'admin')     return styles.badgeAdmin
-  if (role === 'conductor') return styles.badgeConductor
-  return styles.badgeOperador
-}
-
-function roleBadgeIcon(role: Role) {
-  return role === 'admin' ? <IconAdmin /> : <IconUser />
+function roleClass(role: Role) {
+  if (role === 'admin')      return ui.roleAdmin
+  if (role === 'monitoring') return ui.roleMonitor
+  if (role === 'conductor')  return ui.roleConductor
+  return ui.roleOther
 }
 
 // ── Component ──────────────────────────────────────────────────────────────────
@@ -130,18 +183,26 @@ export default function UsersContent() {
   const [error,   setError]   = useState<string | null>(null)
 
   const [search, setSearch] = useState('')
+  const [roleFilter, setRoleFilter] = useState<RoleFilter>('all')
   const [page,   setPage]   = useState(1)
 
-  type Modal = 'none' | 'create' | 'edit' | 'delete'
+  type Modal = 'none' | 'create' | 'edit' | 'delete' | 'reset'
   const [modal,      setModal]      = useState<Modal>('none')
   const [selected,   setSelected]   = useState<User | null>(null)
   const [form,       setForm]       = useState<UserForm>(EMPTY_FORM)
   const [formError,  setFormError]  = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [resetError, setResetError] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [showPassword, setShowPassword] = useState(false)
   const [sendInvitation, setSendInvitation] = useState(false)
+
+  // Empresas (clientes) asignables al usuario
+  const [clients,        setClients]        = useState<Client[]>([])
+  const [clientsLoading, setClientsLoading] = useState(false)
+  const [clientsError,   setClientsError]   = useState<string | null>(null)
+  const [selectedClientIds, setSelectedClientIds] = useState<string[]>([])
 
   // ── Fetch ────────────────────────────────────────────────────────────────────
   const fetchUsers = async () => {
@@ -161,6 +222,7 @@ export default function UsersContent() {
         role:           String(u.role ?? 'monitoring') as Role,
         active:         u.status === 1,
         createdAt:      String(u.created_at ?? ''),
+        lastAccess:     String(u.last_login_at ?? ''),
         phone:          String(u.phone ?? ''),
         recovery_email: String(u.recovery_email ?? ''),
       }))
@@ -174,27 +236,21 @@ export default function UsersContent() {
 
   useEffect(() => { fetchUsers() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-const filtered = useMemo(() => {
-  const q = search.toLowerCase()
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
 
-  return users
-    .filter(u =>
-      u.username.toLowerCase().includes(q) ||
-      u.email.toLowerCase().includes(q) ||
-      u.role.toLowerCase().includes(q)
-    )
-    .sort(
-      (a, b) =>
-        new Date(a.createdAt).getTime() -
-        new Date(b.createdAt).getTime()
-    )
-
-}, [users, search])
+    return users
+      .filter(u =>
+        (roleFilter === 'all' || u.role === roleFilter) &&
+        (u.username.toLowerCase().includes(q) || u.email.toLowerCase().includes(q))
+      )
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+  }, [users, search, roleFilter])
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const paginated  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
-  useEffect(() => { setPage(1) }, [search])
+  useEffect(() => { setPage(1) }, [search, roleFilter])
 
   // ── Toast ────────────────────────────────────────────────────────────────────
   const showToast = (msg: string) => {
@@ -217,13 +273,42 @@ const filtered = useMemo(() => {
     }
   }
 
+  // ── Clientes (empresas) ──────────────────────────────────────────────────────
+  const fetchClients = async () => {
+    setClientsLoading(true)
+    setClientsError(null)
+    try {
+      const res = await fetch(`${API}/clients`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) throw new Error()
+      const json = await res.json()
+      setClients(Array.isArray(json.data) ? json.data : [])
+    } catch {
+      setClientsError('No se pudieron cargar las empresas.')
+    } finally {
+      setClientsLoading(false)
+    }
+  }
+
+  const toggleClient = (id: string) =>
+    setSelectedClientIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    )
+
+  const allClientsSelected = clients.length > 0 && selectedClientIds.length === clients.length
+  const toggleAllClients = () =>
+    setSelectedClientIds(allClientsSelected ? [] : clients.map(c => c.id))
+
   // ── Modals ───────────────────────────────────────────────────────────────────
   const openCreate = () => {
+    setSelectedClientIds([])
+    fetchClients()
     setForm(EMPTY_FORM)
     setFormError(null)
     setSelected(null)
     setShowPassword(false)
-    setSendInvitation(false)
+    setSendInvitation(true)
     setModal('create')
   }
   const openEdit = (user: User) => {
@@ -242,7 +327,15 @@ const filtered = useMemo(() => {
     setModal('edit')
   }
   const openDelete = (user: User) => { setSelected(user); setDeleteError(null); setModal('delete') }
+  const openReset = (user: User) => { setSelected(user); setResetError(null); setModal('reset') }
   const closeModal = () => { setModal('none'); setSelected(null); setShowPassword(false) }
+
+  useEffect(() => {
+    if (modal === 'none') return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !submitting) closeModal() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [modal, submitting]) // closeModal es estable en la práctica
 
   // ── Submit ───────────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
@@ -250,7 +343,7 @@ const filtered = useMemo(() => {
       setFormError('Nombre, usuario y email son requeridos')
       return
     }
-    if (modal === 'create' && !form.password_hash.trim()) {
+    if (modal === 'create' && !sendInvitation && !form.password_hash.trim()) {
       setFormError('La contraseña es requerida')
       return
     }
@@ -262,7 +355,14 @@ const filtered = useMemo(() => {
         const res = await fetch(`${API}/users`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ ...form, send_invitation: sendInvitation }),
+          body: JSON.stringify({
+            ...form,
+            password_hash: sendInvitation ? tempPassword() : form.password_hash,
+            send_invitation: sendInvitation,
+            clients_information: clients
+              .filter(c => selectedClientIds.includes(c.id))
+              .map(c => ({ client_id: Number(c.id), client_name: c.name })),
+          }),
         })
         if (!res.ok) throw new Error('No se pudo crear el usuario')
       } else if (modal === 'edit' && selected) {
@@ -322,250 +422,399 @@ const filtered = useMemo(() => {
     }
   }
 
+  // ── Reset password (envía el enlace de recuperación al correo del usuario) ───
+  const handleReset = async () => {
+    if (!selected) return
+    setSubmitting(true)
+    setResetError(null)
+    try {
+      const res = await fetch(`${API}/auth/recovery`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: selected.email }),
+      })
+      if (!res.ok) throw new Error()
+      const email = selected.email
+      closeModal()
+      showToast(`Enlace de restablecimiento enviado a ${email}`)
+    } catch {
+      setResetError('No se pudo enviar el enlace. Intenta de nuevo.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <>
-      {/* Header */}
-      <div className={styles.header}>
-        <div className={styles.headerLeft}>
-          <h2>Administración de usuarios</h2>
-          <p>Administra los usuarios y sus roles</p>
+      <div className={ui.page}>
+        {/* Encabezado */}
+        <div className={ui.header}>
+          <div>
+            <h2 className={ui.title}>Usuarios del sistema</h2>
+            <p className={ui.subtitle}>
+              Administradores, monitoristas y conductores con acceso a la plataforma.
+            </p>
+          </div>
+          {isAdmin && (
+            <button className={ui.btnPrimary} onClick={openCreate}>
+              <IconUserPlus /> Agregar Usuario
+            </button>
+          )}
         </div>
-        {isAdmin && (
-          <button className={styles.btnAdd} onClick={openCreate}>
-            <IconPlus /> Nuevo Usuario
-          </button>
-        )}
-      </div>
 
-      {/* Card */}
-      <div className={styles.card}>
-        {/* Toolbar */}
-        <div className={styles.toolbar}>
-          <div className={styles.searchWrap}>
+        {/* Filtros */}
+        <div className={ui.filters}>
+          <label className={ui.searchWrap}>
             <IconSearch />
             <input
-              className={styles.searchInput}
+              className={ui.searchInput}
               type="text"
-              placeholder="Buscar usuarios..."
+              placeholder="Buscar por nombre o correo..."
+              aria-label="Buscar por nombre o correo"
               value={search}
               onChange={e => setSearch(e.target.value)}
             />
-          </div>
-          <span className={styles.showingText}>
-            Mostrando {filtered.length} {filtered.length === 1 ? 'usuario' : 'usuarios'}
-          </span>
+          </label>
+          <select
+            className={ui.roleSelect}
+            aria-label="Filtrar por rol"
+            value={roleFilter}
+            onChange={e => setRoleFilter(e.target.value as RoleFilter)}
+          >
+            <option value="all">Todos los roles</option>
+            <option value="admin">Administrador</option>
+            <option value="monitoring">Monitorista</option>
+            <option value="conductor">Conductor</option>
+          </select>
         </div>
 
-        {/* Table */}
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th>Usuario</th>
-              <th>Rol</th>
-              <th>Status</th>
-              <th>Fecha de creación</th>
-              <th>Email</th>
-              {isAdmin && <th>Acciones</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr className={styles.stateRow}>
-                <td colSpan={isAdmin ? 6 : 5}><span className={styles.spinner} />Cargando usuarios...</td>
-              </tr>
-            ) : error ? (
-              <tr className={styles.stateRow}>
-                <td colSpan={isAdmin ? 6 : 5}>⚠️ {error}</td>
-              </tr>
-            ) : paginated.length === 0 ? (
-              <tr className={styles.stateRow}>
-                <td colSpan={isAdmin ? 6 : 5}>No se encontraron usuarios</td>
-              </tr>
-            ) : paginated.map(user => (
-              <tr key={user.id}>
-                <td>
-                  <div className={styles.userCell}>
-                    <div className={styles.avatar}>{initials(user.username)}</div>
-                    <div className={styles.userNameText}>{user.username}</div>
-                  </div>
-                </td>
-                <td>
-                  <span className={`${styles.badge} ${roleBadgeClass(user.role)}`}>
-                    {roleBadgeIcon(user.role)}
-                    {translateRole(user.role)}
-                  </span>
-                </td>
-                <td>
-                  <label className={styles.toggle} title={!isAdmin ? 'Solo los administradores pueden cambiar el estado' : user.role === 'admin' ? 'No se puede desactivar un administrador' : undefined}>
-                    <input
-                      type="checkbox"
-                      checked={user.active}
-                      onChange={() => handleToggle(user)}
-                      disabled={!isAdmin || user.role === 'admin'}
-                    />
-                    <span className={styles.toggleTrack} />
-                    <span className={styles.toggleThumb} />
-                  </label>
-                </td>
-                <td>{formatDate(user.createdAt)}</td>
-                <td>{user.email}</td>
-                {isAdmin && (
-                  <td>
-                    <div className={styles.actions}>
-                      <button className={styles.btnIcon} onClick={() => openEdit(user)} title="Editar">
-                        <IconEdit />
-                      </button>
-                      <button
-                          className={`${styles.btnIcon} ${styles.btnIconDanger}`}
-                          onClick={() => openDelete(user)}
-                          title="Eliminar"
-                        >
-                        <IconTrash />
-                      </button>
-                    </div>
-                  </td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        {/* Pagination */}
-        <div className={styles.pagination}>
-          <span className={styles.pageInfo}>Página {page} de {totalPages}</span>
-          <div className={styles.pageButtons}>
-            <button className={styles.btnPage} disabled={page <= 1} onClick={() => setPage(p => p - 1)}>Prev</button>
-            <button className={styles.btnPage} disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>Next</button>
+        {/* Tabla */}
+        <div className={ui.tableCard}>
+          <div className={ui.tableScroll}>
+            <table className={ui.table}>
+              <thead>
+                <tr>
+                  <th>Usuario</th>
+                  <th>Correo electrónico</th>
+                  <th>Rol</th>
+                  <th>Estado</th>
+                  <th>Fecha de creación</th>
+                  <th>Último acceso</th>
+                  {isAdmin && <th className={ui.thActions}>Acciones</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr className={ui.stateRow}>
+                    <td colSpan={isAdmin ? 7 : 6}><span className={ui.spinner} />Cargando usuarios...</td>
+                  </tr>
+                ) : error ? (
+                  <tr className={ui.stateRow}>
+                    <td colSpan={isAdmin ? 7 : 6}>⚠️ {error}</td>
+                  </tr>
+                ) : paginated.length === 0 ? (
+                  <tr className={ui.stateRow}>
+                    <td colSpan={isAdmin ? 7 : 6}>
+                      No se encontraron usuarios
+                      <span className={ui.stateHint}>Prueba con otro nombre, correo o rol.</span>
+                    </td>
+                  </tr>
+                ) : paginated.map(user => (
+                  <tr key={user.id}>
+                    <td>
+                      <div className={ui.userCell}>
+                        <div className={ui.avatar}>{initials(user.username)}</div>
+                        <div>
+                          <div className={ui.userName}>{user.username}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className={ui.email}>{user.email}</td>
+                    <td>
+                      <span className={`${ui.pill} ${roleClass(user.role)}`}>{translateRole(user.role)}</span>
+                    </td>
+                    <td>
+                      <span className={`${ui.pill} ${user.active ? ui.statusActive : ui.statusInactive}`}>
+                        {user.active ? 'Activo' : 'Inactivo'}
+                      </span>
+                    </td>
+                    <td className={ui.date}>{formatDate(user.createdAt)}</td>
+                    <td className={ui.date}>{formatDate(user.lastAccess,'Sin accesar')}</td>
+                    {isAdmin && (
+                      <td>
+                        <div className={ui.actions}>
+                          <button className={ui.action} onClick={() => openEdit(user)}
+                            title="Editar usuario" aria-label={`Editar a ${user.username}`}>
+                            <IconEdit />
+                          </button>
+                          <button className={ui.action} onClick={() => openReset(user)}
+                            title="Restablecer contraseña" aria-label={`Restablecer contraseña de ${user.username}`}>
+                            <IconKey />
+                          </button>
+                          <button className={ui.action} onClick={() => handleToggle(user)}
+                            disabled={user.role === 'admin'}
+                            title={user.role === 'admin'
+                              ? 'No se puede desactivar un administrador'
+                              : user.active ? 'Desactivar usuario' : 'Activar usuario'}
+                            aria-label={user.active ? `Desactivar a ${user.username}` : `Activar a ${user.username}`}>
+                            {user.active ? <IconUserX /> : <IconUserCheck />}
+                          </button>
+                          <button className={`${ui.action} ${ui.actionDanger}`} onClick={() => openDelete(user)}
+                            title="Eliminar usuario" aria-label={`Eliminar a ${user.username}`}>
+                            <IconTrash />
+                          </button>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
+
+          {filtered.length > PAGE_SIZE && (
+            <div className={ui.pagination}>
+              <span className={ui.pageInfo}>
+                Página {page} de {totalPages} · {filtered.length} usuarios
+              </span>
+              <div className={ui.pageButtons}>
+                <button className={ui.btnPage} disabled={page <= 1} onClick={() => setPage(p => p - 1)}>Anterior</button>
+                <button className={ui.btnPage} disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>Siguiente</button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
       {/* ── Create / Edit Modal ── */}
       {(modal === 'create' || modal === 'edit') && (
-        <div className={styles.overlay}>
-          <div className={styles.modal}>
-            <p className={styles.modalTitle}>{modal === 'create' ? 'Nuevo Usuario' : 'Editar Usuario'}</p>
-
-            <div className={styles.formGroup}>
-              <label className={styles.label}>Nombre completo</label>
-              <input className={styles.input} type="text" placeholder="Nombre del usuario"
-                value={form.name}
-                onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
-            </div>
-
-            <div className={styles.formGroup}>
-              <label className={styles.label}>Nombre de usuario</label>
-              <input className={styles.input} type="text" placeholder="Username"
-                value={form.username}
-                onChange={e => setForm(f => ({ ...f, username: e.target.value }))} />
-            </div>
-
-            <div className={styles.formGroup}>
-              <label className={styles.label}>Correo electrónico</label>
-              <input className={styles.input} type="email" placeholder="correo@empresa.com"
-                value={form.email}
-                onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
-            </div>
-
-            <div className={styles.formGroup}>
-              <label className={styles.label}>Correo de recuperación</label>
-              <input className={styles.input} type="email" placeholder="recuperacion@empresa.com"
-                value={form.recovery_email}
-                onChange={e => setForm(f => ({ ...f, recovery_email: e.target.value }))} />
-            </div>
-
-            <div className={styles.formGroup}>
-              <label className={styles.label}>Teléfono</label>
-              <input className={styles.input} type="tel" placeholder="5215512345678"
-                value={form.phone}
-                onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} />
-            </div>
-
-            <div className={styles.formGroup}>
-              <label className={styles.label}>
-                {modal === 'edit' ? 'Contraseña (dejar vacío para no cambiar)' : 'Contraseña'}
-              </label>
-              <div style={{ position: 'relative' }}>
-                <input
-                  className={styles.input}
-                  type={showPassword ? 'text' : 'password'}
-                  placeholder="••••••••"
-                  value={form.password_hash}
-                  onChange={e => setForm(f => ({ ...f, password_hash: e.target.value }))}
-                  style={{ paddingRight: '36px' }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(v => !v)}
-                  tabIndex={-1}
-                  style={{
-                    position: 'absolute', right: '10px', top: '50%',
-                    transform: 'translateY(-50%)', background: 'none',
-                    border: 'none', cursor: 'pointer', padding: 0,
-                    display: 'flex', alignItems: 'center',
-                  }}
-                >
-                  <EyeIcon visible={showPassword} />
-                </button>
+        <div className={m.overlay} onMouseDown={e => { if (e.target === e.currentTarget && !submitting) closeModal() }}>
+          <form
+            className={m.dialog}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="user-modal-title"
+            noValidate
+            onSubmit={e => { e.preventDefault(); handleSubmit() }}
+          >
+            <div className={m.header}>
+              <div>
+                <h2 id="user-modal-title" className={m.title}>
+                  {modal === 'create' ? 'Agregar usuario' : 'Editar usuario'}
+                </h2>
+                <p className={m.subtitle}>
+                  {modal === 'create'
+                    ? 'Usuarios internos con acceso a la plataforma (no conductores).'
+                    : `Actualiza los datos de ${selected?.username ?? 'este usuario'}.`}
+                </p>
               </div>
+              <button type="button" className={m.close} aria-label="Cerrar" onClick={closeModal}>
+                <IconClose />
+              </button>
             </div>
 
-            <div className={styles.formGroup}>
-              <label className={styles.label}>Rol</label>
-              <select className={styles.select} value={form.role}
-                disabled={modal === 'edit' && selected?.role === 'admin'}
-                onChange={e => setForm(f => ({ ...f, role: e.target.value as Role }))}>
-                <option value="admin">Administrador</option>
-                <option value="monitoring">Monitorista</option>
-                <option value="operator">Operador</option>
-              </select>
-              {modal === 'edit' && selected?.role === 'admin' && (
-                <p className={styles.lockedHint}>El rol de administrador no puede modificarse.</p>
+            <div className={m.body}>
+              <div className={m.field}>
+                <label className={m.label} htmlFor="um-name">Nombre completo<span className={m.req}>*</span></label>
+                <input id="um-name" className={m.input} type="text" autoFocus
+                  value={form.name}
+                  onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+              </div>
+
+              <div className={m.grid}>
+                <div className={m.field}>
+                  <label className={m.label} htmlFor="um-email">Correo electrónico<span className={m.req}>*</span></label>
+                  <input id="um-email" className={m.input} type="email" placeholder="nombre@empresa.mx"
+                    value={form.email}
+                    onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+                </div>
+                <div className={m.field}>
+                  <label className={m.label} htmlFor="um-phone">Teléfono</label>
+                  <input id="um-phone" className={m.input} type="tel" placeholder="55 1234 5678"
+                    value={form.phone}
+                    onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} />
+                </div>
+
+                <div className={m.field}>
+                  <label className={m.label} htmlFor="um-role">Rol</label>
+                  <select id="um-role" className={m.select} value={form.role}
+                    disabled={modal === 'edit' && selected?.role === 'admin'}
+                    onChange={e => setForm(f => ({ ...f, role: e.target.value as Role }))}>
+                    <option value="admin">Administrador</option>
+                    <option value="monitoring">Monitorista</option>
+                    <option value="operator">Operador</option>
+                  </select>
+                  <p className={m.hint}>
+                    {modal === 'edit' && selected?.role === 'admin'
+                      ? 'El rol de administrador no puede modificarse.'
+                      : ROLE_HINTS[form.role]}
+                  </p>
+                </div>
+                <div className={m.field}>
+                  <label className={m.label} htmlFor="um-username">Nombre de usuario<span className={m.req}>*</span></label>
+                  <input id="um-username" className={m.input} type="text"
+                    value={form.username}
+                    onChange={e => setForm(f => ({ ...f, username: e.target.value }))} />
+                </div>
+
+                <div className={`${m.field} ${m.full}`}>
+                  <label className={m.label} htmlFor="um-recovery">Correo de recuperación</label>
+                  <input id="um-recovery" className={m.input} type="email" placeholder="recuperacion@empresa.mx"
+                    value={form.recovery_email}
+                    onChange={e => setForm(f => ({ ...f, recovery_email: e.target.value }))} />
+                </div>
+              </div>
+
+              {modal === 'create' && (
+                <div className={m.field}>
+                  <span className={m.label} id="um-clients">
+                    Empresas asignadas
+                    {selectedClientIds.length > 0 && (
+                      <span className={m.checkCount}> · {selectedClientIds.length} seleccionada{selectedClientIds.length > 1 ? 's' : ''}</span>
+                    )}
+                  </span>
+
+                  {clientsLoading && <p className={m.hint}>Cargando empresas...</p>}
+
+                  {clientsError && (
+                    <p className={m.error} role="alert">
+                      {clientsError}{' '}
+                      <button type="button" className={m.linkBtn} onClick={fetchClients}>Reintentar</button>
+                    </p>
+                  )}
+
+                  {!clientsLoading && !clientsError && clients.length === 0 && (
+                    <p className={m.hint}>No hay empresas disponibles.</p>
+                  )}
+
+                  {clients.length > 0 && (
+                    <div className={m.checklist} role="group" aria-labelledby="um-clients">
+                      <label className={`${m.checkItem} ${m.checkAll}`}>
+                        <input type="checkbox" checked={allClientsSelected} onChange={toggleAllClients} />
+                        <span>Seleccionar todas</span>
+                      </label>
+                      {clients.map(c => (
+                        <label key={c.id} className={m.checkItem}>
+                          <input type="checkbox"
+                            checked={selectedClientIds.includes(c.id)}
+                            onChange={() => toggleClient(c.id)} />
+                          <span>{c.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {modal === 'create' && (
+                <div className={m.field}>
+                  <span className={m.label} id="um-access">Acceso</span>
+                  <div className={m.options} role="radiogroup" aria-labelledby="um-access">
+                    <button type="button" role="radio" aria-checked={sendInvitation}
+                      className={`${m.option} ${sendInvitation ? m.optionOn : ''}`}
+                      onClick={() => setSendInvitation(true)}>
+                      <IconMail />
+                      <span className={m.optionText}>
+                        <span className={m.optionTitle}>Enviar invitación por correo</span>
+                        <span className={m.optionDesc}>El usuario define su contraseña</span>
+                      </span>
+                    </button>
+                    <button type="button" role="radio" aria-checked={!sendInvitation}
+                      className={`${m.option} ${!sendInvitation ? m.optionOn : ''}`}
+                      onClick={() => setSendInvitation(false)}>
+                      <IconKey />
+                      <span className={m.optionText}>
+                        <span className={m.optionTitle}>Asignar contraseña</span>
+                        <span className={m.optionDesc}>Compártela de forma segura</span>
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {(modal === 'edit' || !sendInvitation) && (
+                <div className={m.field}>
+                  <label className={m.label} htmlFor="um-password">
+                    {modal === 'edit'
+                      ? 'Nueva contraseña'
+                      : <>Contraseña<span className={m.req}>*</span></>}
+                  </label>
+                  <div className={m.passwordWrap}>
+                    <input id="um-password" className={m.input}
+                      type={showPassword ? 'text' : 'password'}
+                      placeholder="••••••••"
+                      autoComplete="new-password"
+                      value={form.password_hash}
+                      onChange={e => setForm(f => ({ ...f, password_hash: e.target.value }))} />
+                    <button type="button" className={m.eye}
+                      aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                      onClick={() => setShowPassword(v => !v)}>
+                      <EyeIcon visible={showPassword} />
+                    </button>
+                  </div>
+                  {modal === 'edit' && <p className={m.hint}>Déjala vacía para conservar la actual.</p>}
+                </div>
               )}
             </div>
 
-            {modal === 'create' && (
-              <div className={styles.formGroup} style={{ flexDirection: 'row', alignItems: 'center', gap: '8px' }}>
-                <input
-                  type="checkbox"
-                  id="sendInvitation"
-                  checked={sendInvitation}
-                  onChange={e => setSendInvitation(e.target.checked)}
-                  style={{ width: 'auto', cursor: 'pointer' }}
-                />
-                <label htmlFor="sendInvitation" className={styles.label} style={{ margin: 0, cursor: 'pointer' }}>
-                  Enviar invitación por correo
-                </label>
-              </div>
-            )}
+            <div className={m.footer}>
+              {formError && <p className={`${m.error} ${m.footerNote}`} role="alert">{formError}</p>}
+              <button type="button" className={`${m.btn} ${m.btnGhost}`} onClick={closeModal}>Cancelar</button>
+              <button type="submit" className={`${m.btn} ${m.btnPrimary}`} disabled={submitting}>
+                <IconSave />
+                {submitting ? 'Guardando...' : modal === 'create' ? 'Crear usuario' : 'Guardar cambios'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
-            {formError && <p className={styles.errorMsg}>{formError}</p>}
-
-            <div className={styles.modalActions}>
-              <button className={styles.btnCancel} onClick={closeModal}>Cancelar</button>
-              <button className={styles.btnSave} onClick={handleSubmit} disabled={submitting}>
-                {submitting ? 'Guardando...' : modal === 'create' ? 'Crear Usuario' : 'Guardar Cambios'}
+      {/* ── Delete Confirm Modal ── */}
+      {modal === 'delete' && selected && (
+        <div className={m.overlay} onMouseDown={e => { if (e.target === e.currentTarget && !submitting) closeModal() }}>
+          <div className={`${m.dialog} ${m.dialogSm}`} role="alertdialog" aria-modal="true" aria-labelledby="user-delete-title">
+            <div className={m.header}>
+              <h2 id="user-delete-title" className={m.title}>Eliminar usuario</h2>
+              <button type="button" className={m.close} aria-label="Cerrar" onClick={closeModal}><IconClose /></button>
+            </div>
+            <div className={m.body}>
+              <p className={m.message}>
+                ¿Estás seguro de que deseas eliminar a <strong>{selected.username}</strong>?
+                Esta acción no se puede deshacer.
+              </p>
+              {deleteError && <p className={m.error} role="alert">{deleteError}</p>}
+            </div>
+            <div className={m.footer}>
+              <button type="button" className={`${m.btn} ${m.btnGhost}`} onClick={closeModal}>Cancelar</button>
+              <button type="button" className={`${m.btn} ${m.btnDanger}`} onClick={handleDelete} disabled={submitting || !!deleteError}>
+                <IconTrash />
+                {submitting ? 'Eliminando...' : 'Eliminar'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ── Delete Confirm Modal ── */}
-      {modal === 'delete' && selected && (
-        <div className={styles.overlay}>
-          <div className={styles.modal}>
-            <p className={styles.modalTitle}>Eliminar Usuario</p>
-            <p className={styles.deleteWarning}>
-              ¿Estás seguro de que deseas eliminar a <strong>{selected.username}</strong>?
-              Esta acción no se puede deshacer.
-            </p>
-            {deleteError && <p className={styles.errorMsg}>{deleteError}</p>}
-            <div className={styles.modalActions}>
-              <button className={styles.btnCancel} onClick={closeModal}>Cancelar</button>
-              <button className={styles.btnDelete} onClick={handleDelete} disabled={submitting || !!deleteError}>
-                {submitting ? 'Eliminando...' : 'Eliminar'}
+      {/* ── Reset Password Confirm Modal ── */}
+      {modal === 'reset' && selected && (
+        <div className={m.overlay} onMouseDown={e => { if (e.target === e.currentTarget && !submitting) closeModal() }}>
+          <div className={`${m.dialog} ${m.dialogSm}`} role="dialog" aria-modal="true" aria-labelledby="user-reset-title">
+            <div className={m.header}>
+              <h2 id="user-reset-title" className={m.title}>Restablecer contraseña</h2>
+              <button type="button" className={m.close} aria-label="Cerrar" onClick={closeModal}><IconClose /></button>
+            </div>
+            <div className={m.body}>
+              <p className={m.message}>
+                Se enviará un enlace para crear una nueva contraseña a <strong>{selected.email}</strong>.
+              </p>
+              {resetError && <p className={m.error} role="alert">{resetError}</p>}
+            </div>
+            <div className={m.footer}>
+              <button type="button" className={`${m.btn} ${m.btnGhost}`} onClick={closeModal}>Cancelar</button>
+              <button type="button" className={`${m.btn} ${m.btnPrimary}`} onClick={handleReset} disabled={submitting}>
+                <IconMail />
+                {submitting ? 'Enviando...' : 'Enviar enlace'}
               </button>
             </div>
           </div>

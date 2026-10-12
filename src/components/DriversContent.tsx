@@ -6,7 +6,7 @@ import styles from './UsersContent.module.css'
 type Sex = 'male' | 'female' | 'other'
 
 interface Driver {
-  id: number
+  id: string
   name: string
   sex: Sex
   phone: string
@@ -114,9 +114,9 @@ export default function DriversContent() {
       if (!res.ok) throw new Error('Error al cargar conductores')
       const raw: Record<string, unknown>[] = Array.isArray(json.data) ? json.data : []
       const normalized: Driver[] = raw.map(d => ({
-        id:      Number(d.id),
+        id:      String(d.id ?? ''),
         name:    String(d.name    ?? 'Sin nombre'),
-        sex:     (d.sex as Sex) ?? 'other',
+        sex:     ((d.gender ?? d.sex) as Sex) ?? 'other',
         phone:   String(d.phone   ?? '—'),
         address: String(d.address ?? '—'),
       }))

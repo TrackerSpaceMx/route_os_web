@@ -1,0 +1,263 @@
+/* Estilos exclusivos de la pantalla "Usuarios del sistema".
+   UsersContent.module.css es compartido con otras pantallas, por eso no se modifica. */
+
+.page {
+  max-width: 1232px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* ── Encabezado ───────────────────────────────────────────────────────────── */
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 28px;
+}
+.title {
+  margin: 0 0 6px;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #f1f5f9;
+}
+.subtitle {
+  margin: 0;
+  font-size: 15px;
+  color: #8b97ad;
+}
+.btnPrimary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 18px;
+  border: none;
+  border-radius: 8px;
+  background: #1d4ed8;
+  color: #fff;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.btnPrimary:hover { background: #2563eb; }
+.btnPrimary:focus-visible,
+.action:focus-visible,
+.searchInput:focus-visible,
+.roleSelect:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+/* ── Filtros ──────────────────────────────────────────────────────────────── */
+.filters {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 16px;
+  margin-bottom: 24px;
+  border: 1px solid #27374c;
+  border-radius: 14px;
+  background: #181a1b;
+}
+.searchWrap {
+  flex: 1 1 280px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  border: 1px solid #27374c;
+  border-radius: 8px;
+  background: #181a1b;
+  color: #6b7a96;
+}
+.searchWrap:focus-within { border-color: #3b82f6; }
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  padding: 11px 0;
+  border: none;
+  background: transparent;
+  color: #e2e8f0;
+  font-family: inherit;
+  font-size: 14px;
+}
+.searchInput:focus-visible { outline: none; }
+.searchInput::placeholder { color: #6b7a96; }
+.roleSelect {
+  flex: 0 0 auto;
+  min-width: 180px;
+  padding: 11px 38px 11px 16px;
+  border: 1px solid #27374c;
+  border-radius: 8px;
+  background-color: #181a1b;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b97ad' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  color: #e2e8f0;
+  font-family: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  appearance: none;
+}
+
+/* ── Tabla ────────────────────────────────────────────────────────────────── */
+.tableCard {
+  border: 1px solid #27374c;
+  border-radius: 14px;
+  background: #181a1b;
+  overflow: hidden;
+}
+.tableScroll { overflow-x: auto; }
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 860px;
+}
+.table th {
+  padding: 18px 24px;
+  border-bottom: 1px solid #27374c;
+  text-align: left;
+  font-size: 14px;
+  font-weight: 500;
+  color: #8b97ad;
+  white-space: nowrap;
+}
+.table td {
+  padding: 14px 24px;
+  border-bottom: 1px solid #223148;
+  font-size: 14px;
+  color: #cbd5e1;
+  vertical-align: middle;
+}
+.table tbody tr:last-child td { border-bottom: none; }
+.table tbody tr:hover { background: rgba(59, 130, 246, 0.04); }
+.thActions { text-align: right !important; }
+
+.userCell {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.avatar {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #222527;
+  color: #60a5fa;
+  font-size: 13px;
+  font-weight: 700;
+}
+.userName {
+  font-size: 15px;
+  font-weight: 600;
+  color: #f1f5f9;
+  line-height: 1.3;
+}
+.userMeta {
+  margin-top: 1px;
+  font-size: 12px;
+  color: #8b97ad;
+}
+.email, .date { white-space: nowrap; }
+
+/* ── Pills (rol y estado) ─────────────────────────────────────────────────── */
+.pill {
+  display: inline-block;
+  padding: 3px 12px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.roleAdmin     { background: #0c1f4a; color: #60a5fa; border-color: #1e40af; }
+.roleMonitor   { background: #06301d; color: #4ade80; border-color: #15803d; }
+.roleConductor { background: #35280a; color: #facc15; border-color: #854d0e; }
+.roleOther     { background: transparent; color: #cbd5e1; border-color: #334155; }
+.statusActive   { background: #06301d; color: #4ade80; border-color: #15803d; }
+.statusInactive { background: transparent; color: #94a3b8; border-color: #334155; }
+
+/* ── Acciones ─────────────────────────────────────────────────────────────── */
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.action {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.action:hover:not(:disabled) { background: #25292d; color: #f1f5f9; }
+.actionDanger:hover:not(:disabled) { background: #2a1214; color: #f87171; }
+.action:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* ── Paginación (solo aparece con más de una página) ──────────────────────── */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 24px;
+  border-top: 1px solid #27374c;
+}
+.pageInfo { font-size: 13px; color: #8b97ad; }
+.pageButtons { display: flex; gap: 8px; }
+.btnPage {
+  padding: 6px 16px;
+  border: 1px solid #27374c;
+  border-radius: 8px;
+  background: transparent;
+  color: #94a3b8;
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.btnPage:hover:not(:disabled) { border-color: #3b82f6; color: #60a5fa; }
+.btnPage:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* ── Estados vacío / carga ────────────────────────────────────────────────── */
+.stateRow td {
+  padding: 56px 16px;
+  text-align: center;
+  color: #8b97ad;
+}
+.stateHint {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+  color: #6b7a96;
+}
+.spinner {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  margin-right: 8px;
+  vertical-align: middle;
+  border: 2px solid #27374c;
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 2s; }
+}
