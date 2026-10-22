@@ -1,0 +1,317 @@
+/* Solo overrides específicos de la tabla de conductores.
+   El layout base (tabla, celdas, paginación) viene de UsersView.module.css */
+
+/* Sin override de headers — usa el gris de UsersView.module.css */
+
+/* ── Foto ── */
+.photo {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  border: 1.5px solid #2d3f54;
+  background: #1e293b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #60a5fa;
+  font-size: 13px;
+  font-weight: 700;
+}
+.photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* ── Nombre ── */
+.driverName {
+  font-size: 14px;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+
+/* ── No. empleado — texto monospace plano ── */
+.empNumber {
+  font-family: ui-monospace, 'Roboto Mono', monospace;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #7a8fa8;
+  letter-spacing: 0.02em;
+}
+
+/* ── Teléfono con badge +1 ── */
+.phoneWrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 14px;
+  color: #cbd5e1;
+}
+.phoneBadge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #0c1f4a;
+  color: #60a5fa;
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid #1e3a8a;
+}
+
+/* ── Licencia — monospace ── */
+.licenseText {
+  font-family: ui-monospace, 'Roboto Mono', monospace;
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+/* ── Badges de vencimiento ── */
+.expiryWrap { display: flex; flex-direction: column; gap: 3px; }
+
+.expiryBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  width: fit-content;
+}
+.expiryBadgeSoon    { background: #2d1010; color: #f87171; border: 1px solid #7f1d1d; }
+.expiryBadgeExpired { background: #2d1010; color: #fca5a5; border: 1px solid #991b1b; }
+.expiryDate        { font-size: 14px; color: #cbd5e1; }   /* sin advertencia → igual que resto de celdas */
+.expiryDateWarning { font-size: 12px; color: #f87171; }  /* con advertencia → más pequeño, debajo del badge */
+
+/* ── Badge de estado ── */
+.statusBadge {
+  display: inline-block;
+  padding: 3px 11px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+/* Disponible → verde (igual que en el diseño de referencia) */
+.statusAvailable   { background: #052e16; color: #4ade80; border: 1px solid #166534; }
+/* No disponible / En viaje → azul oscuro */
+.statusUnavailable { background: #0a1929; color: #60a5fa; border: 1px solid #1e3a5f; }
+
+/* ── Acciones ── */
+.thActions { text-align: right !important; }
+.actions { display: flex; justify-content: flex-end; gap: 2px; }
+.action {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.action:hover       { background: #1e293b; color: #e2e8f0; }
+.action:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
+.actionDanger:hover:not(:disabled) { background: #2a1214; color: #f87171; }
+
+/* ══ Formulario crear / editar conductor ══ */
+/* form.formDialog: el selector con elemento gana al .dialog compartido sin depender del orden de carga */
+form.formDialog { max-width: 780px; }
+
+.formBody {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px;
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+  gap: 28px;
+}
+
+/* Columna de foto */
+.photoCol { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.photoCol > span { align-self: center; text-align: center; }
+.photoHint { text-align: center; }
+
+.dropzone {
+  position: relative;
+  width: 128px;
+  height: 128px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed #2d3f54;
+  border-radius: 50%;
+  background: #181a1b;
+  color: #9aa4b5;
+  font-size: 12.5px;
+  text-align: center;
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.dropzone:hover,
+.dropzoneActive { border-color: #3b82f6; background: #1b2230; color: #60a5fa; }
+.dropzone:focus-within { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25); }
+.dropzone img { width: 100%; height: 100%; object-fit: cover; }
+.dropText { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 0 18px; line-height: 1.3; }
+
+/* input real oculto pero accesible por teclado */
+.fileInput { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+
+.photoRemove {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #f87171;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.photoRemove:hover { text-decoration: underline; }
+
+.avatarLg {
+  width: 128px;
+  height: 128px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 2px solid #2d3f54;
+  background: #1e293b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #60a5fa;
+  font-size: 34px;
+  font-weight: 700;
+}
+.avatarLg img { width: 100%; height: 100%; object-fit: cover; }
+
+/* Columna de campos */
+.fields { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.twoCols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.dateInput { color-scheme: dark; }
+
+/* Teléfonos */
+.phoneRow { display: flex; align-items: center; gap: 10px; }
+.phoneInputWrap { position: relative; flex: 1; min-width: 0; color: #9aa4b5; }
+.phoneInputWrap svg {
+  position: absolute;
+  left: 13px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.phoneInputWrap input { padding-left: 38px; }
+
+.phoneTag {
+  flex-shrink: 0;
+  min-width: 96px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid #27374c;
+  border-radius: 8px;
+  color: #9aa4b5;
+  font-size: 13px;
+  font-weight: 500;
+}
+.phoneTagPrimary { border-color: #1d4ed8; background: rgba(29, 78, 216, 0.12); color: #60a5fa; }
+
+@media (max-width: 640px) {
+  .formBody { grid-template-columns: 1fr; gap: 20px; }
+  .twoCols { grid-template-columns: 1fr; }
+}
+
+/* ══ Detalle del conductor ══ */
+.rowClickable { cursor: pointer; }
+.rowClickable:focus-visible { outline: 2px solid #3b82f6; outline-offset: -2px; }
+
+div.detailDialog { max-width: 720px; }
+.detailHead { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.detailHeadText { min-width: 0; }
+.detailHeadText h2, .detailHeadText p { overflow: hidden; text-overflow: ellipsis; }
+.detailHeadRight { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.detailAvatar {
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 2px solid #2d3f54;
+  background: #1e293b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #60a5fa;
+  font-size: 18px;
+  font-weight: 700;
+}
+.detailAvatar img { width: 100%; height: 100%; object-fit: cover; }
+
+.detailGrid {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 22px 32px;
+}
+.detailGrid > div { min-width: 0; }
+.detailLabel { margin: 0 0 6px; font-size: 13px; color: #9aa4b5; }
+.detailValue {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 500;
+  color: #e8eaed;
+  overflow-wrap: anywhere;
+}
+.mono { font-family: ui-monospace, 'Roboto Mono', monospace; font-size: 14px; }
+.detailPhone { display: inline-flex; align-items: center; gap: 10px; }
+.detailTag {
+  padding: 2px 10px;
+  border: 1px solid #1d4ed8;
+  border-radius: 999px;
+  background: rgba(29, 78, 216, 0.12);
+  color: #60a5fa;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+@media (max-width: 560px) {
+  .detailGrid { grid-template-columns: 1fr; }
+  .detailHeadRight { flex-direction: column-reverse; align-items: flex-end; gap: 8px; }
+}
+.detailExpiry { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.detailExpiryWarn { color: #f87171; }
+/* Notas */
+.textarea {
+  width: 100%;
+  min-height: 84px;
+  padding: 10px 16px;
+  border: 1px solid #27374c;
+  border-radius: 8px;
+  background-color: #181a1b;
+  color: #e8eaed;
+  font-family: inherit;
+  font-size: 14.5px;
+  line-height: 1.45;
+  resize: vertical;
+  transition: border-color 0.15s;
+}
+.textarea::placeholder { color: #7d8794; }
+.textarea:focus-visible { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25); }
+.notesHint { display: flex; justify-content: space-between; gap: 12px; }
+
+.detailFull { grid-column: 1 / -1; }
+.detailNotes { align-items: stretch; font-weight: 400; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.detailNotesEmpty { color: #9aa4b5; font-style: italic; }

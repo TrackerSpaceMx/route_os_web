@@ -1,0 +1,63 @@
+/* Solo overrides específicos de la pantalla de puntos de interés.
+   El layout base (tabla, filtros, paginación) viene de UsersView.module.css
+   y los modales de UsersModal.module.css */
+
+/* ── Nombre ── */
+.pointName {
+  font-size: 14px;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+
+/* ── Categoría (pill con ícono) ── */
+.category {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 11px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.catAirport   { background: #0c1f4a; color: #60a5fa; border-color: #1e40af; }
+.catStation   { background: #2a1747; color: #c084fc; border-color: #6b21a8; }
+.catTerminal  { background: #35280a; color: #facc15; border-color: #854d0e; }
+.catWarehouse { background: #06283a; color: #22d3ee; border-color: #0e7490; }
+.catStop      { background: #06301d; color: #4ade80; border-color: #15803d; }
+.catOther     { background: transparent; color: #cbd5e1; border-color: #334155; }
+
+/* ── Coordenadas — monospace plano ── */
+.coords {
+  font-family: ui-monospace, 'Roboto Mono', monospace;
+  font-size: 12.5px;
+  color: #7a8fa8;
+  white-space: nowrap;
+}
+.nowrap { white-space: nowrap; }
+
+/* ══ Formulario nuevo punto ══ */
+/* form.formDialog: el selector con elemento gana al .dialog compartido sin depender del orden de carga */
+form.formDialog { max-width: 860px; }
+
+/* Búsqueda de dirección */
+.geoRow { display: flex; gap: 10px; }
+.geoRow > input { flex: 1; min-width: 0; }
+.geoBtn { height: 38px; white-space: nowrap; }
+
+/* Mapa: isolation evita que los z-index de Leaflet se monten sobre el pie del modal */
+.mapWrap {
+  position: relative;
+  isolation: isolate;
+  height: 340px;
+  border: 1px solid #27374c;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.mapWrap :global(.leaflet-container) { height: 100%; width: 100%; background: #181a1b; font-family: inherit; }
+
+@media (max-width: 560px) {
+  .geoRow { flex-direction: column; }
+  .mapWrap { height: 260px; }
+}

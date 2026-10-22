@@ -10,6 +10,8 @@ type Role = 'admin' | 'monitoring' | 'conductor'
 
 interface User {
   id: number
+  user_id: string
+  name: string
   username: string
   email: string
   role: Role
@@ -18,6 +20,7 @@ interface User {
   lastAccess: string
   phone: string
   recovery_email: string
+  clientes_information?: { client_id: number; client_name: string }[] | 'all'
 }
 
 interface UserForm {
@@ -216,15 +219,22 @@ export default function UsersContent() {
       const json = await res.json()
       const raw: Record<string, unknown>[] = Array.isArray(json.data) ? json.data : []
       const normalized: User[] = raw.map((u, index) => ({
-        id:             index,
-        username:       String(u.username ?? 'Sin nombre'),
-        email:          String(u.email ?? ''),
-        role:           String(u.role ?? 'monitoring') as Role,
-        active:         u.status === 1,
-        createdAt:      String(u.created_at ?? ''),
-        lastAccess:     String(u.last_login_at ?? ''),
-        phone:          String(u.phone ?? ''),
-        recovery_email: String(u.recovery_email ?? ''),
+        id:                   index,
+        user_id:              String(u.user_id ?? ''),
+        name:                 String(u.name ?? u.username ?? ''),
+        username:             String(u.username ?? ''),
+        email:                String(u.email ?? ''),
+        role:                 String(u.role ?? 'monitoring') as Role,
+        active:               u.status === 1,
+        createdAt:            String(u.created_at ?? ''),
+        lastAccess:           String(u.last_login_at ?? ''),
+        phone:                String(u.phone ?? ''),
+        recovery_email:       String(u.recovery_email ?? ''),
+        clientes_information: u.clientes_information === 'all'
+          ? 'all'
+          : Array.isArray(u.clientes_information)
+            ? (u.clientes_information as { client_id: number; client_name: string }[])
+            : [],
       }))
       setUsers(normalized)
     } catch (e: unknown) {
@@ -263,10 +273,10 @@ export default function UsersContent() {
     const updated = { ...user, active: !user.active }
     setUsers(prev => prev.map(u => u.id === user.id ? updated : u))
     try {
-      await fetch(`${API}/users/${user.username}`, {
+      await fetch(`${API}/users/${user.user_id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ username: user.username, status: updated.active ? 1 : 0 }),
+        body: JSON.stringify({ status: updated.active ? 1 : 0 }),
       })
     } catch {
       setUsers(prev => prev.map(u => u.id === user.id ? user : u))
@@ -274,7 +284,7 @@ export default function UsersContent() {
   }
 
   // ── Clientes (empresas) ──────────────────────────────────────────────────────
-  const fetchClients = async () => {
+  const fetchClients = async (): Promise<Client[]> => {
     setClientsLoading(true)
     setClientsError(null)
     try {
@@ -283,9 +293,12 @@ export default function UsersContent() {
       })
       if (!res.ok) throw new Error()
       const json = await res.json()
-      setClients(Array.isArray(json.data) ? json.data : [])
+      const data: Client[] = Array.isArray(json.data) ? json.data : []
+      setClients(data)
+      return data
     } catch {
       setClientsError('No se pudieron cargar las empresas.')
+      return []
     } finally {
       setClientsLoading(false)
     }
@@ -311,10 +324,10 @@ export default function UsersContent() {
     setSendInvitation(true)
     setModal('create')
   }
-  const openEdit = (user: User) => {
+  const openEdit = async (user: User) => {
     setSelected(user)
     setForm({
-      name:           user.username,
+      name:           user.name,
       username:       user.username,
       email:          user.email,
       phone:          user.phone,
@@ -325,6 +338,12 @@ export default function UsersContent() {
     setFormError(null)
     setShowPassword(false)
     setModal('edit')
+    // Cargar empresas y luego preseleccionar las del usuario
+    const allClients = await fetchClients()
+    const preselected = user.clientes_information === 'all'
+      ? allClients.map(c => c.id)
+      : (user.clientes_information ?? []).map(c => String(c.client_id))
+    setSelectedClientIds(preselected)
   }
   const openDelete = (user: User) => { setSelected(user); setDeleteError(null); setModal('delete') }
   const openReset = (user: User) => { setSelected(user); setResetError(null); setModal('reset') }
@@ -338,13 +357,44 @@ export default function UsersContent() {
   }, [modal, submitting]) // closeModal es estable en la práctica
 
   // ── Submit ───────────────────────────────────────────────────────────────────
+  const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+  const isValidPhone = (phone: string) => /^\d{10}$/.test(phone.trim())
+
   const handleSubmit = async () => {
-    if (!form.name.trim() || !form.username.trim() || !form.email.trim()) {
-      setFormError('Nombre, usuario y email son requeridos')
+    if (!form.name.trim() || !form.username.trim()) {
+      setFormError('Nombre y usuario son requeridos')
+      return
+    }
+    if (!form.email.trim()) {
+      setFormError('El correo electrónico es requerido')
+      return
+    }
+    if (!isValidEmail(form.email.trim())) {
+      setFormError('El correo electrónico no es válido')
+      return
+    }
+    if (!form.recovery_email.trim()) {
+      setFormError('El correo de recuperación es requerido')
+      return
+    }
+    if (!isValidEmail(form.recovery_email.trim())) {
+      setFormError('El correo de recuperación no es válido')
+      return
+    }
+    if (!form.phone.trim()) {
+      setFormError('El teléfono es requerido')
+      return
+    }
+    if (!isValidPhone(form.phone)) {
+      setFormError('El teléfono debe tener exactamente 10 dígitos')
       return
     }
     if (modal === 'create' && !sendInvitation && !form.password_hash.trim()) {
       setFormError('La contraseña es requerida')
+      return
+    }
+    if (selected?.clientes_information !== 'all' && selectedClientIds.length === 0) {
+      setFormError('Debes asignar al menos una empresa')
       return
     }
 
@@ -366,7 +416,7 @@ export default function UsersContent() {
         })
         if (!res.ok) throw new Error('No se pudo crear el usuario')
       } else if (modal === 'edit' && selected) {
-        const payload: Partial<UserForm> = {}
+        const payload: Partial<UserForm> & { clients_information?: { client_id: number; client_name: string }[] } = {}
 
         if (form.name          !== selected.username)     payload.name           = form.name
         if (form.username      !== selected.username)     payload.username       = form.username
@@ -376,12 +426,11 @@ export default function UsersContent() {
         if (form.recovery_email.trim())                   payload.recovery_email = form.recovery_email
         if (form.password_hash.trim())                    payload.password_hash  = form.password_hash
 
-        if (Object.keys(payload).length === 0) {
-          closeModal()
-          return
-        }
+        payload.clients_information = clients
+          .filter(c => selectedClientIds.includes(c.id))
+          .map(c => ({ client_id: Number(c.id), client_name: c.name }))
 
-        const res = await fetch(`${API}/users/${selected.username}`, {
+        const res = await fetch(`${API}/users/${selected.user_id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: JSON.stringify(payload),
@@ -403,7 +452,7 @@ export default function UsersContent() {
     setSubmitting(true)
     setDeleteError(null)
     try {
-      const res = await fetch(`${API}/users/${selected.username}`, {
+      const res = await fetch(`${API}/users/${selected.user_id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       })
@@ -631,9 +680,10 @@ export default function UsersContent() {
                 </div>
                 <div className={m.field}>
                   <label className={m.label} htmlFor="um-phone">Teléfono</label>
-                  <input id="um-phone" className={m.input} type="tel" placeholder="55 1234 5678"
+                  <input id="um-phone" className={m.input} type="tel" placeholder="5512345678"
+                    maxLength={10}
                     value={form.phone}
-                    onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} />
+                    onChange={e => setForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 10) }))} />
                 </div>
 
                 <div className={m.field}>
@@ -666,46 +716,51 @@ export default function UsersContent() {
                 </div>
               </div>
 
-              {modal === 'create' && (
-                <div className={m.field}>
+              <div className={m.field}>
                   <span className={m.label} id="um-clients">
                     Empresas asignadas
-                    {selectedClientIds.length > 0 && (
+                    {selected?.clientes_information !== 'all' && selectedClientIds.length > 0 && (
                       <span className={m.checkCount}> · {selectedClientIds.length} seleccionada{selectedClientIds.length > 1 ? 's' : ''}</span>
                     )}
                   </span>
 
-                  {clientsLoading && <p className={m.hint}>Cargando empresas...</p>}
+                  {/* Owner de cuenta: solo leyenda, sin edición */}
+                  {modal === 'edit' && selected?.clientes_information === 'all' ? (
+                    <p className={m.hint}>Este usuario tiene acceso a todas las empresas de la cuenta.</p>
+                  ) : (
+                    <>
+                      {clientsLoading && <p className={m.hint}>Cargando empresas...</p>}
 
-                  {clientsError && (
-                    <p className={m.error} role="alert">
-                      {clientsError}{' '}
-                      <button type="button" className={m.linkBtn} onClick={fetchClients}>Reintentar</button>
-                    </p>
-                  )}
+                      {clientsError && (
+                        <p className={m.error} role="alert">
+                          {clientsError}{' '}
+                          <button type="button" className={m.linkBtn} onClick={fetchClients}>Reintentar</button>
+                        </p>
+                      )}
 
-                  {!clientsLoading && !clientsError && clients.length === 0 && (
-                    <p className={m.hint}>No hay empresas disponibles.</p>
-                  )}
+                      {!clientsLoading && !clientsError && clients.length === 0 && (
+                        <p className={m.hint}>No hay empresas disponibles.</p>
+                      )}
 
-                  {clients.length > 0 && (
-                    <div className={m.checklist} role="group" aria-labelledby="um-clients">
-                      <label className={`${m.checkItem} ${m.checkAll}`}>
-                        <input type="checkbox" checked={allClientsSelected} onChange={toggleAllClients} />
-                        <span>Seleccionar todas</span>
-                      </label>
-                      {clients.map(c => (
-                        <label key={c.id} className={m.checkItem}>
-                          <input type="checkbox"
-                            checked={selectedClientIds.includes(c.id)}
-                            onChange={() => toggleClient(c.id)} />
-                          <span>{c.name}</span>
-                        </label>
-                      ))}
-                    </div>
+                      {clients.length > 0 && (
+                        <div className={m.checklist} role="group" aria-labelledby="um-clients">
+                          <label className={`${m.checkItem} ${m.checkAll}`}>
+                            <input type="checkbox" checked={allClientsSelected} onChange={toggleAllClients} />
+                            <span>Seleccionar todas</span>
+                          </label>
+                          {clients.map(c => (
+                            <label key={c.id} className={m.checkItem}>
+                              <input type="checkbox"
+                                checked={selectedClientIds.includes(c.id)}
+                                onChange={() => toggleClient(c.id)} />
+                              <span>{c.name}</span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
-              )}
 
               {modal === 'create' && (
                 <div className={m.field}>
@@ -733,12 +788,10 @@ export default function UsersContent() {
                 </div>
               )}
 
-              {(modal === 'edit' || !sendInvitation) && (
+              {modal === 'create' && !sendInvitation && (
                 <div className={m.field}>
                   <label className={m.label} htmlFor="um-password">
-                    {modal === 'edit'
-                      ? 'Nueva contraseña'
-                      : <>Contraseña<span className={m.req}>*</span></>}
+                    Contraseña<span className={m.req}>*</span>
                   </label>
                   <div className={m.passwordWrap}>
                     <input id="um-password" className={m.input}
@@ -753,7 +806,6 @@ export default function UsersContent() {
                       <EyeIcon visible={showPassword} />
                     </button>
                   </div>
-                  {modal === 'edit' && <p className={m.hint}>Déjala vacía para conservar la actual.</p>}
                 </div>
               )}
             </div>
