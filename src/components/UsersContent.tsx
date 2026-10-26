@@ -350,7 +350,8 @@ export default function UsersContent() {
   const closeModal = () => { setModal('none'); setSelected(null); setShowPassword(false) }
 
   useEffect(() => {
-    if (modal === 'none') return
+    // Esc solo cierra los diálogos de confirmación; los formularios (crear/editar) solo se cierran con Cancelar
+    if (modal === 'none' || modal === 'create' || modal === 'edit') return
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !submitting) closeModal() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -638,7 +639,7 @@ export default function UsersContent() {
 
       {/* ── Create / Edit Modal ── */}
       {(modal === 'create' || modal === 'edit') && (
-        <div className={m.overlay} onMouseDown={e => { if (e.target === e.currentTarget && !submitting) closeModal() }}>
+        <div className={m.overlay}>
           <form
             className={m.dialog}
             role="dialog"

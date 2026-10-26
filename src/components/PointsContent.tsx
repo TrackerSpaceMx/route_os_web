@@ -454,7 +454,7 @@ export default function PointsContent() {
 
       {/* ── Create Modal ── */}
       {modal === 'create' && (
-        <div className={m.overlay} onMouseDown={e => { if (e.target === e.currentTarget && !submitting) closeModal() }}>
+        <div className={m.overlay}>
           <form
             className={`${m.dialog} ${pc.formDialog}`}
             role="dialog"

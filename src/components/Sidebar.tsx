@@ -3,7 +3,7 @@ import styles from './Sidebar.module.css'
 
 export type View =
   | 'home' | 'route-config' | 'my-routes' | 'trip-assignment' | 'live-tracking'
-  | 'users' | 'drivers' | 'points'
+  | 'users' | 'drivers' | 'points' | 'protocols'
 
 // Cambia aquí el nombre de marca si es necesario
 const BRAND_NAME = 'RouteOS'
@@ -56,6 +56,9 @@ const icons = {
   points: (
     <Svg><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></Svg>
   ),
+  protocols: (
+    <Svg><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></Svg>
+  ),
   custom: (
     <Svg><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" /></Svg>
   ),
@@ -79,6 +82,7 @@ const NAV: NavEntry[] = [
   { view: 'live-tracking',   label: 'Monitoreo en Vivo',    icon: icons.live },
   { view: 'drivers',         label: 'Conductores',          icon: icons.drivers },
   { view: 'points',          label: 'Puntos de interés',    icon: icons.points },
+  { view: 'protocols',       label: 'Protocolos',           icon: icons.protocols },
   { view: 'users',           label: 'Usuarios',             icon: icons.users },
 ]
 
@@ -91,6 +95,7 @@ export const VIEW_TITLES: Record<View, string> = {
   users: 'Usuarios del Sistema',
   drivers: 'Conductores',
   points: 'Puntos de interés',
+  protocols: 'Protocolos',
 }
 
 interface Props {

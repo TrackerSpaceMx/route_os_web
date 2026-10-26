@@ -611,7 +611,7 @@ export default function DriversContent() {
 
       {/* ── Create / Edit Modal ── */}
       {(modal === 'create' || modal === 'edit') && (
-        <div className={m.overlay} onMouseDown={e => { if (e.target === e.currentTarget && !submitting) closeModal() }}>
+        <div className={m.overlay}>
           <form
             className={`${m.dialog} ${dc.formDialog}`}
             role="dialog"

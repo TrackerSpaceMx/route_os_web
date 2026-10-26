@@ -5,12 +5,13 @@ import UsersContent from '../components/UsersContent'
 import PointsContent from '../components/PointsContent'
 import DriversContent from '../components/DriversContent'
 import TripAssignmentContent from '../components/TripAssignmentContent'
+import ProtocolsContent from '../components/ProtocolsContent'
 import Sidebar, { VIEW_TITLES } from '../components/Sidebar'
 import type { View } from '../components/Sidebar'
 import { MapContainer, TileLayer, Marker, Polyline, useMapEvents, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import styles from './IndexPage.module.css'
-import rcStyles from './RouteConfig.module.css'
+import cv from './RouteConfigView.module.css'
 import listStyles from '../components/UsersContent.module.css'
 import 'leaflet/dist/leaflet.css';
 
@@ -97,10 +98,23 @@ function FlyToWaypoint({ lat, lng }: { lat: number; lng: number }) {
 const numberedIcon = (n: number) =>
   L.divIcon({
     className: '',
-    iconSize: [28, 28],
-    iconAnchor: [14, 14],
-    html: `<div style="width:28px;height:28px;border-radius:50%;background:#0d1117;border:2px solid #94a3b8;color:#f1f5f9;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.5)">${n}</div>`,
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
+    html: `<div style="width:30px;height:30px;border-radius:50%;background:#1d4ed8;border:2px solid #fff;color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.5)">${n}</div>`,
   })
+
+// Distancia en línea recta entre dos coordenadas (km)
+function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
+  const R = 6371, rad = Math.PI / 180
+  const dLat = (b.lat - a.lat) * rad, dLng = (b.lng - a.lng) * rad
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLng / 2) ** 2
+  return 2 * R * Math.asin(Math.sqrt(h))
+}
+
+function formatDuration(min: number) {
+  const h = Math.floor(min / 60), m = min % 60
+  return h > 0 ? `${h} h ${m} min` : `${m} min`
+}
 
 // ── MyRoutesContent ────────────────────────────────────────────────────────────
 interface RouteSummary {
@@ -378,7 +392,7 @@ function MyRoutesContent({ onCreateNew, reloadToken, isAdmin }: { onCreateNew: (
 }
 
 // ── RouteConfigContent ─────────────────────────────────────────────────────────
-function RouteConfigContent({ onSaved }: { onSaved: () => void }) {
+function RouteConfigContent({ onSaved, onCancel }: { onSaved: () => void; onCancel: () => void }) {
   const CDMX: [number, number] = [19.4326, -99.1332]
   const { token } = useAuth()
 
@@ -387,7 +401,6 @@ function RouteConfigContent({ onSaved }: { onSaved: () => void }) {
   const [pointSearch, setPointSearch] = useState('')
   const [showDropdown, setShowDropdown] = useState(false)
   const [routeName,   setRouteName]   = useState('')
-  const [activeDays,  setActiveDays]  = useState<number[]>([0,1,2,3,4])
   const [routeMode,   setRouteMode]   = useState<'search' | 'draw'>('draw')
   const [waypoints, setWaypoints]     = useState<Waypoint[]>([])
   const [flyTo,     setFlyTo]         = useState<[number, number] | null>(null)
@@ -397,12 +410,33 @@ function RouteConfigContent({ onSaved }: { onSaved: () => void }) {
   const [addSearchError, setAddSearchError] = useState<string | null>(null)
   const [adding,    setAdding]        = useState(false)
   const addInputRef = useRef<HTMLInputElement>(null)
+  const [map, setMap] = useState<L.Map | null>(null)
+  const [submitted, setSubmitted] = useState(false)
+
+  // Campos del encabezado que se envían en POST /routes (ver confirmFinalize).
+  interface ClientOption { id: string | number; name: string }
+  const [clients,   setClients]   = useState<ClientOption[]>([])
+  const [clientId,  setClientId]  = useState('')
+  const [departure, setDeparture] = useState('')
+  const [folio,     setFolio]     = useState('')
 
   // Load existing points
   useEffect(() => {
     fetch(`${API}/points`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.status === 204 ? { data: [] } : r.json())
       .then((d: { data: PointData[] }) => setPoints(d.data ?? []))
+      .catch(() => {})
+  }, [token])
+
+  // Load companies (mismo endpoint que Usuarios)
+  useEffect(() => {
+    fetch(`${API}/clients-assinged`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : { data: [] })
+      .then((d: { data?: ClientOption[] }) => {
+        const list = Array.isArray(d.data) ? d.data : []
+        setClients(list)
+        if (list.length === 1) setClientId(String(list[0].id))
+      })
       .catch(() => {})
   }, [token])
 
@@ -431,11 +465,13 @@ function RouteConfigContent({ onSaved }: { onSaved: () => void }) {
     setShowDropdown(false)
   }
 
-  // Total stats
-  const totalKm  = (waypoints.length * 12.4).toFixed(1)
-  const totalMin = waypoints.length * 18
-  const totalH   = Math.floor(totalMin / 60)
-  const totalM   = totalMin % 60
+  // Tramos y totales (línea recta, 30 km/h de promedio urbano)
+  const legs = waypoints.slice(1).map((w, i) => {
+    const km = haversineKm(waypoints[i], w)
+    return { km, min: Math.max(1, Math.round((km / 30) * 60)) }
+  })
+  const totalKm  = legs.reduce((acc, l) => acc + l.km, 0)
+  const totalMin = legs.reduce((acc, l) => acc + l.min, 0)
 
   const handleMapClick = (lat: number, lng: number) => {
     if (routeMode !== 'draw') return
@@ -518,7 +554,11 @@ function RouteConfigContent({ onSaved }: { onSaved: () => void }) {
 
   const clearAll = () => { setWaypoints([]); setNextId(1); setExpanded(null) }
 
-  const DAY_MAP = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday']
+  const resetHeader = () => {
+    setRouteName(''); setDeparture(''); setFolio('')
+    if (clients.length !== 1) setClientId('')
+  }
+
   const [saveMsg,   setSaveMsg]   = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
 
   // ── Finalizar ruta (popup) ───────────────────────────────────────────────
@@ -548,9 +588,10 @@ function RouteConfigContent({ onSaved }: { onSaved: () => void }) {
   const [finalizeError,  setFinalizeError]  = useState<string | null>(null)
 
   const openFinalize = () => {
+    setSubmitted(true)
     if (!routeName.trim())        return setSaveMsg({ type: 'err', text: 'Escribe un nombre para la ruta.' })
+    if (!departure)               return setSaveMsg({ type: 'err', text: 'Indica la salida programada.' })
     if (waypoints.length < 2)     return setSaveMsg({ type: 'err', text: 'Agrega al menos 2 puntos.' })
-    if (activeDays.length === 0)  return setSaveMsg({ type: 'err', text: 'Selecciona al menos un día activo.' })
 
     setSaveMsg(null)
     setFinalizeError(null)
@@ -589,7 +630,7 @@ function RouteConfigContent({ onSaved }: { onSaved: () => void }) {
     try {
       const resolvedPoints: { id: number; point_id: string | null; point_name: string }[] = []
 
-      for (const r of finalizeRows) {
+      for (const [idx, r] of finalizeRows.entries()) {
         let pid: string | null = r.point_id ?? null
 
         if (r.isNew) {
@@ -631,16 +672,25 @@ function RouteConfigContent({ onSaved }: { onSaved: () => void }) {
         }
 
         resolvedPoints.push({
-          id: r.id,
+          id: idx + 1,
           point_id: pid,
           point_name: r.name.trim(),
         })
       }
 
+      // Empresa elegida (el id se envía tal cual lo devuelve la API)
+      const client = clients.find(c => String(c.id) === clientId)
+
       const body = {
         route_name: routeName.trim(),
-        active_days: activeDays.sort((a,b) => a-b).map(i => DAY_MAP[i]),
         points: resolvedPoints,
+        client_id: client?.id ?? null,
+        client_name: client?.name ?? null,
+        folio: folio.trim() || null,
+        // La ubicación de inicio es el point_id del primer punto de la ruta
+        starting_location: resolvedPoints[0]?.point_id ?? null,
+        // datetime-local entrega 'YYYY-MM-DDTHH:mm'; el back espera segundos
+        scheduled_departure: departure.length === 16 ? `${departure}:00` : departure,
       }
 
       const res = await fetch(`${API}/routes`, {
@@ -653,7 +703,7 @@ function RouteConfigContent({ onSaved }: { onSaved: () => void }) {
 
       setShowFinalize(false)
       setSaveMsg({ type: 'ok', text: '¡Ruta guardada correctamente!' })
-      setTimeout(() => { clearAll(); setRouteName(''); setActiveDays([0,1,2,3,4]); setSaveMsg(null); onSaved() }, 1800)
+      setTimeout(() => { clearAll(); resetHeader(); setSaveMsg(null); setSubmitted(false); onSaved() }, 1800)
     } catch (e: any) {
       setFinalizeError(e.message ?? 'Error al guardar la ruta.')
     } finally {
@@ -662,395 +712,374 @@ function RouteConfigContent({ onSaved }: { onSaved: () => void }) {
   }
 
   const polyline: [number, number][] = waypoints.map(w => [w.lat, w.lng])
+  const nameMissing = submitted && !routeName.trim()
+  const departureMissing = submitted && !departure
+
+  const goTo = (wp: Waypoint) => { setFlyTo([wp.lat, wp.lng]); setExpanded(wp.id) }
 
   return (
-    <div className={rcStyles.wrapper}>
-      {/* ── Left panel ── */}
-      <aside className={rcStyles.leftPanel}>
-        <div className={rcStyles.panelHead}>
-          <h2 className={rcStyles.title}>Crear nueva ruta</h2>
-          <p className={rcStyles.subtitle}>Configura y traza tu ruta</p>
+    <div className={cv.page}>
+      <header className={cv.header}>
+        <h2 className={cv.title}>Crear nueva ruta</h2>
+        <p className={cv.subtitle}>Captura los datos generales, traza el recorrido y fija el radio de llegada de cada punto.</p>
+      </header>
+
+      {/* ── Información general ── */}
+      <section className={cv.card}>
+        <div className={cv.cardHead}>
+          <span className={cv.cardIcon}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2" />
+              <path d="M15 18H9" />
+              <path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.62l-3.48-4.35A1 1 0 0 0 17.52 8H14" />
+              <circle cx="17" cy="18" r="2" /><circle cx="7" cy="18" r="2" />
+            </svg>
+          </span>
+          <h3 className={cv.cardTitle}>Información general</h3>
         </div>
-
-        <div className={rcStyles.scrollArea}>
-          {/* Route name */}
-          <div className={rcStyles.field}>
-            <label className={rcStyles.label}>Nombre de la ruta</label>
-            <input
-              className={rcStyles.input}
-              placeholder="Aeropuerto Nacional"
-              value={routeName}
-              onChange={e => setRouteName(e.target.value)}
-            />
-          </div>
-
-          {/* Días activos */}
-          <div className={rcStyles.field}>
-            <label className={rcStyles.label}>Días activos</label>
-            <div className={rcStyles.daysRow}>
-              {['L','M','M','J','V','S','D'].map((d, i) => (
-                <button
-                  key={i}
-                  className={`${rcStyles.dayBtn} ${activeDays.includes(i) ? rcStyles.dayActive : ''}`}
-                  onClick={() => setActiveDays(prev =>
-                    prev.includes(i) ? prev.filter(x => x !== i) : [...prev, i]
-                  )}
-                  title={['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'][i]}
-                >
-                  {d}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Route Mode */}
-          <div className={rcStyles.field}>
-            <label className={rcStyles.label}>Route Mode</label>
-            <div className={rcStyles.modeCards}>
-              <button
-                className={`${rcStyles.modeCard} ${routeMode === 'search' ? rcStyles.modeActive : ''}`}
-                onClick={() => setRouteMode('search')}
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                  <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" fill="currentColor"/>
-                </svg>
-                <span className={rcStyles.modeLabel}>Crear ruta con puntos existentes</span>
-              </button>
-              <button
-                className={`${rcStyles.modeCard} ${routeMode === 'draw' ? rcStyles.modeActive : ''}`}
-                onClick={() => setRouteMode('draw')}
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                  <path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-                <span className={rcStyles.modeLabel}>Dibujar nueva ruta</span>
-                <span className={rcStyles.modeDesc}>Da click sobre el mapa para colocar nuevos puntos.</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Barra de búsqueda en modo dibujar */}
-          {routeMode === 'draw' && (
-            <div className={rcStyles.field}>
-              <label className={rcStyles.label}>Buscar dirección o coordenadas</label>
-              <div className={rcStyles.comboWrap}>
-                <div className={rcStyles.comboInputRow}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className={rcStyles.comboIcon}>
-                    <circle cx="11" cy="11" r="8" stroke="currentColor" strokeWidth="2"/>
-                    <path d="M21 21l-4.35-4.35" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+        <div className={cv.cardBody}>
+          <div className={cv.grid}>
+            <div className={cv.field}>
+              <label className={cv.label} htmlFor="route-company">Empresa</label>
+              <div className={cv.inputWrap}>
+                <span className={cv.inputIcon}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <rect x="4" y="2" width="16" height="20" rx="2" /><path d="M9 22v-4h6v4M8 6h.01M16 6h.01M12 6h.01M12 10h.01M8 10h.01M16 10h.01M8 14h.01M12 14h.01M16 14h.01" />
                   </svg>
-                  <input
-                    ref={addInputRef}
-                    className={rcStyles.comboInput}
-                    placeholder="Ej: Av. Insurgentes Sur 123 o 19.4326, -99.1332"
-                    value={addSearch}
-                    onChange={e => { setAddSearch(e.target.value); setAddSearchError(null) }}
-                    onKeyDown={e => e.key === 'Enter' && handleAddSearch()}
-                  />
-                  {addSearch && (
-                    <button className={rcStyles.comboClear} onClick={() => { setAddSearch(''); setAddSearchError(null) }}>✕</button>
-                  )}
-                </div>
-                <button
-                  className={rcStyles.btnSearchAddr}
-                  onClick={handleAddSearch}
-                  disabled={adding || !addSearch.trim()}
+                </span>
+                <select
+                  id="route-company"
+                  className={`${cv.select} ${cv.selectWithIcon}`}
+                  value={clientId}
+                  onChange={e => setClientId(e.target.value)}
+                  disabled={clients.length === 0}
                 >
-                  {adding ? (
-                    <span className={rcStyles.spinnerSm} />
-                  ) : (
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-                      <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" fill="currentColor"/>
-                    </svg>
-                  )}
-                  {adding ? 'Buscando...' : 'Agregar punto'}
-                </button>
-                {addSearchError && (
-                  <div className={rcStyles.comboEmpty}>{addSearchError}</div>
-                )}
+                  <option value="">{clients.length === 0 ? 'Sin empresas disponibles' : 'Selecciona una empresa'}</option>
+                  {clients.map(c => <option key={String(c.id)} value={String(c.id)}>{c.name}</option>)}
+                </select>
               </div>
             </div>
-          )}
 
-          {/* Combobox puntos existentes */}
-          {routeMode === 'search' && (
-            <div className={rcStyles.field}>
-              <label className={rcStyles.label}>Agregar punto existente</label>
-              <div className={rcStyles.comboWrap}>
-                <div className={rcStyles.comboInputRow}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className={rcStyles.comboIcon}>
-                    <circle cx="11" cy="11" r="8" stroke="currentColor" strokeWidth="2"/>
-                    <path d="M21 21l-4.35-4.35" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+            <div className={cv.field}>
+              <label className={cv.label} htmlFor="route-folio">Folio del viaje</label>
+              <input
+                id="route-folio"
+                className={`${cv.input} ${cv.inputMono}`}
+                placeholder="Ej. TRP-2026-0153"
+                value={folio}
+                onChange={e => setFolio(e.target.value)}
+                maxLength={40}
+              />
+            </div>
+
+            <div className={cv.field}>
+              <label className={cv.label} htmlFor="route-departure">Salida programada<span className={cv.req}>*</span></label>
+              <input
+                id="route-departure"
+                type="datetime-local"
+                className={`${cv.input} ${cv.inputDate} ${departureMissing ? cv.inputInvalid : ''}`}
+                value={departure}
+                onChange={e => setDeparture(e.target.value)}
+                aria-invalid={departureMissing}
+              />
+              {departureMissing && <p className={cv.error}>Indica la fecha y hora de salida</p>}
+            </div>
+
+            <div className={`${cv.field} ${cv.span2}`}>
+              <label className={cv.label} htmlFor="route-name">Nombre de la ruta<span className={cv.req}>*</span></label>
+              <input
+                id="route-name"
+                className={`${cv.input} ${nameMissing ? cv.inputInvalid : ''}`}
+                placeholder="Ej. Aeropuerto Nacional"
+                value={routeName}
+                onChange={e => setRouteName(e.target.value)}
+                aria-invalid={nameMissing}
+              />
+              {nameMissing && <p className={cv.error}>Escribe un nombre para la ruta</p>}
+            </div>
+
+            <div className={cv.field}>
+              <label className={cv.label} htmlFor="route-start">Ubicación de inicio</label>
+              <div className={cv.inputWrap}>
+                <span className={cv.inputIcon}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" />
                   </svg>
-                  <input
-                    className={rcStyles.comboInput}
-                    placeholder={points.length === 0 ? 'No hay puntos creados' : `Buscar entre ${points.length} puntos...`}
-                    value={pointSearch}
-                    disabled={points.length === 0}
-                    onChange={e => { setPointSearch(e.target.value); setShowDropdown(true) }}
-                    onFocus={() => setShowDropdown(true)}
-                    onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
-                  />
-                  {pointSearch && (
-                    <button className={rcStyles.comboClear} onClick={() => { setPointSearch(''); setShowDropdown(false) }}>✕</button>
-                  )}
-                </div>
-                {showDropdown && filteredPoints.length > 0 && (
-                  <div className={rcStyles.comboDropdown}>
-                    {filteredPoints.map(p => {
-                      const alreadyAdded = waypoints.some(w => w.point_id === p.point_id)
-                      return (
-                        <button
-                          key={p.id}
-                          className={rcStyles.comboItem}
-                          onMouseDown={() => !alreadyAdded && addPointAsWaypoint(p)}
-                          disabled={alreadyAdded}
-                          style={alreadyAdded ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}
-                        >
-                          <div className={rcStyles.comboItemIcon}>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-                              <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" fill="currentColor"/>
-                            </svg>
-                          </div>
-                          <div className={rcStyles.comboItemInfo}>
-                            <span className={rcStyles.comboItemName}>{p.point_name}</span>
-                            <span className={rcStyles.comboItemMeta}>
-                              {p.category} · r={p.radius}m{alreadyAdded ? ' · Ya agregado' : ''}
-                            </span>
-                          </div>
-                          {alreadyAdded ? (
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-                              <path d="M20 6L9 17l-5-5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-                            </svg>
-                          ) : (
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" className={rcStyles.comboItemAdd}>
-                              <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/>
-                            </svg>
-                          )}
-                        </button>
-                      )
-                    })}
-                  </div>
-                )}
-                {showDropdown && pointSearch && filteredPoints.length === 0 && (
-                  <div className={rcStyles.comboEmpty}>Sin resultados para "{pointSearch}"</div>
-                )}
+                </span>
+                <input
+                  id="route-start"
+                  className={`${cv.input} ${cv.inputWithIcon} ${cv.inputReadonly}`}
+                  value={waypoints[0]?.name ?? ''}
+                  placeholder="Se completa con el primer punto"
+                  readOnly
+                />
               </div>
             </div>
-          )}
-
-          {/* Waypoints label */}
-          <div className={rcStyles.wpHeader}>
-            <span className={rcStyles.label}>Waypoints</span>
-            <span className={rcStyles.wpCount}>{waypoints.length}</span>
           </div>
+        </div>
+      </section>
 
-          {/* Waypoint list */}
-          <div className={rcStyles.wpList}>
-            {waypoints.length === 0 && (
-              <p className={rcStyles.wpEmpty}>
-                {routeMode === 'draw' ? 'Haz clic en el mapa para agregar waypoints' : 'Busca una ubicación para agregarla'}
-              </p>
-            )}
-            {waypoints.map((wp, idx) => (
-              <div key={wp.id} className={`${rcStyles.wpItem} ${expanded === wp.id ? rcStyles.wpExpanded : ''}`}>
-                <div className={rcStyles.wpRow} onClick={() => setExpanded(expanded === wp.id ? null : wp.id)}>
-                  <span className={rcStyles.dragDot}>⠿</span>
-                  <div className={rcStyles.wpBadge}>{idx + 1}</div>
-                  <div className={rcStyles.wpInfo}>
-                    <div className={rcStyles.wpName}>
-                      {wp.name}
-                      {wp.isStart && <span className={rcStyles.startTag}>Start</span>}
+      {/* ── Ruta y geocercas ── */}
+      <section className={cv.card}>
+        <div className={cv.cardHead}>
+          <span className={cv.cardIcon}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="6" cy="19" r="3" /><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15" /><circle cx="18" cy="5" r="3" />
+            </svg>
+          </span>
+          <div>
+            <h3 className={cv.cardTitle}>Ruta y geocercas</h3>
+            <p className={cv.cardHint}>Cada punto se convierte en una geocerca con radio de llegada.</p>
+          </div>
+        </div>
+
+        <div className={cv.builder}>
+          {/* Panel izquierdo */}
+          <div className={cv.panel}>
+            <div className={cv.panelTop}>
+              <div className={cv.segmented} role="group" aria-label="Modo de ruta">
+                <button type="button" className={`${cv.segBtn} ${routeMode === 'draw' ? cv.segOn : ''}`} onClick={() => setRouteMode('draw')}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>
+                  Dibujar en mapa
+                </button>
+                <button type="button" className={`${cv.segBtn} ${routeMode === 'search' ? cv.segOn : ''}`} onClick={() => setRouteMode('search')}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></svg>
+                  Puntos existentes
+                </button>
+              </div>
+
+              {routeMode === 'draw' ? (
+                <div className={cv.field}>
+                  <div className={cv.searchRow}>
+                    <div className={cv.inputWrap}>
+                      <span className={cv.inputIcon}>
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg>
+                      </span>
+                      <input
+                        ref={addInputRef}
+                        className={`${cv.input} ${cv.inputWithIcon} ${addSearch ? cv.hasClear : ''}`}
+                        placeholder="Dirección o 19.4326, -99.1332"
+                        aria-label="Buscar dirección o coordenadas"
+                        value={addSearch}
+                        onChange={e => { setAddSearch(e.target.value); setAddSearchError(null) }}
+                        onKeyDown={e => e.key === 'Enter' && handleAddSearch()}
+                      />
+                      {addSearch && (
+                        <button type="button" className={cv.clearBtn} aria-label="Borrar búsqueda" onClick={() => { setAddSearch(''); setAddSearchError(null) }}>✕</button>
+                      )}
                     </div>
-                    <div className={rcStyles.wpAddress}>{wp.address}</div>
+                    <button type="button" className={`${cv.btn} ${cv.btnPrimary} ${cv.btnSm}`} onClick={handleAddSearch} disabled={adding || !addSearch.trim()}>
+                      {adding ? <span className={cv.spinner} /> : 'Agregar'}
+                    </button>
                   </div>
-                  <button className={rcStyles.chevronBtn}>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" style={{ transform: expanded === wp.id ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}>
-                      <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-                    </svg>
-                  </button>
-                  <button className={rcStyles.removeBtn} onClick={e => { e.stopPropagation(); removeWaypoint(wp.id) }}>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-                      <path d="M18 6L6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-                    </svg>
-                  </button>
+                  {addSearchError
+                    ? <p className={cv.error}>{addSearchError}</p>
+                    : <p className={cv.hint}>También puedes hacer clic en el mapa para colocar puntos.</p>}
                 </div>
-                {expanded === wp.id && (
-                  <div className={rcStyles.wpDetails}>
-                    <div className={rcStyles.wpCoords}>{wp.lat.toFixed(6)}, {wp.lng.toFixed(6)}</div>
-                  </div>
-                )}
-                {idx < waypoints.length - 1 && (
-                  <div className={rcStyles.wpConnector}>
-                    <div className={rcStyles.connLine} />
-                    <span className={rcStyles.connLabel}>12.4km · 18 min</span>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Footer actions */}
-        {saveMsg && (
-          <div className={saveMsg.type === 'ok' ? rcStyles.alertOk : rcStyles.alertErr}>
-            <span className={rcStyles.alertIcon}>{saveMsg.type === 'ok' ? '✓' : '⚠'}</span>
-            {saveMsg.text}
-          </div>
-        )}
-        <div className={rcStyles.actions}>
-          <button className={rcStyles.btnClear} onClick={clearAll}>Limpiar</button>
-          <button className={rcStyles.btnSave} onClick={openFinalize}>
-            Guardar ruta
-          </button>
-        </div>
-      </aside>
-
-      {/* ── Map area ── */}
-      <div className={rcStyles.mapArea}>
-        <MapContainer center={CDMX} zoom={11} style={{ width: '100%', height: '100%' }} zoomControl={false}>
-          <TileLayer
-            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-            attribution='&copy; <a href="https://carto.com/">CARTO</a>'
-          />
-          <MapClickHandler onMapClick={handleMapClick} />
-          {flyTo && <FlyToWaypoint lat={flyTo[0]} lng={flyTo[1]} />}
-          {polyline.length > 1 && (
-            <Polyline positions={polyline} pathOptions={{ color: '#38BDF8', weight: 3, opacity: 0.9 }} />
-          )}
-          {waypoints.map((wp, idx) => (
-            <Marker key={wp.id} position={[wp.lat, wp.lng]} icon={numberedIcon(idx + 1)}
-              eventHandlers={{ click: () => { setFlyTo([wp.lat, wp.lng]); setExpanded(wp.id) } }}
-            />
-          ))}
-        </MapContainer>
-
-        {/* Map controls */}
-        <div className={rcStyles.mapControls}>
-          <button className={rcStyles.mapBtn} title="Mi ubicación">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.5"/></svg>
-          </button>
-          <button className={rcStyles.mapBtn} title="Zoom in">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/></svg>
-          </button>
-          <button className={rcStyles.mapBtn} title="Zoom out">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M5 12h14" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/></svg>
-          </button>
-          <button className={rcStyles.mapBtn} title="Capas">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          </button>
-          <button className={rcStyles.mapBtn} title="Pantalla completa">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
-          </button>
-        </div>
-
-        {/* Bottom waypoint bar */}
-        {waypoints.length > 0 && (
-          <div className={rcStyles.bottomBar}>
-            <div className={rcStyles.bottomScroll}>
-              {waypoints.map((wp, idx) => (
-                <div key={wp.id} className={rcStyles.bottomStep}>
-                  {idx > 0 && (
-                    <div className={rcStyles.bottomConnector}>
-                      <div className={rcStyles.bottomLine} />
-                      <span className={rcStyles.bottomDist}>12.4km · 18min</span>
-                      <div className={rcStyles.bottomLine} />
-                    </div>
-                  )}
-                  <div className={rcStyles.bottomNode} onClick={() => { setFlyTo([wp.lat, wp.lng]); setExpanded(wp.id) }}>
-                    <div className={rcStyles.bottomNum}>{idx + 1}</div>
-                    <span className={rcStyles.bottomName}>{wp.name.length > 8 ? wp.name.slice(0, 8) + '…' : wp.name}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-            {waypoints.length > 1 && (
-              <div className={rcStyles.totalBox}>
-                <span className={rcStyles.totalLabel}>Total</span>
-                <span className={rcStyles.totalVal}>{totalKm} km</span>
-                <span className={rcStyles.totalVal}>{totalH}h {totalM}m</span>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* ── Popup: finalizar ruta ── */}
-      {showFinalize && (
-        <div className={rcStyles.finalizeOverlay}>
-          <div className={rcStyles.finalizeModal}>
-            <div className={rcStyles.finalizeHeader}>
-              <h3 className={rcStyles.finalizeTitle}>Finalizar ruta</h3>
-              <p className={rcStyles.finalizeSubtitle}>
-                Asigna un nombre a cada punto antes de guardar la ruta.
-                Los puntos nuevos (dibujados o buscados) se guardarán también como puntos de interés reutilizables.
-              </p>
-            </div>
-
-            <div className={rcStyles.finalizeBody}>
-              {finalizeRows.map((r, idx) => (
-                <div key={r.id} className={rcStyles.finalizeRow}>
-                  <div className={rcStyles.finalizeRowTop}>
-                    <div className={rcStyles.wpBadge}>{idx + 1}</div>
-                    <span className={r.isNew ? rcStyles.finalizeTagNew : rcStyles.finalizeTagExisting}>
-                      {r.isNew ? 'Punto nuevo' : 'Punto existente'}
+              ) : (
+                <div className={cv.field}>
+                  <div className={cv.inputWrap}>
+                    <span className={cv.inputIcon}>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg>
                     </span>
-                  </div>
-
-                  <div className={rcStyles.field}>
-                    <label className={rcStyles.labelSm}>Nombre</label>
                     <input
-                      className={rcStyles.inputSm}
-                      value={r.name}
-                      onChange={e => updateFinalizeRow(r.id, 'name', e.target.value)}
-                      placeholder="Nombre del punto"
+                      className={`${cv.input} ${cv.inputWithIcon}`}
+                      placeholder={points.length === 0 ? 'No hay puntos creados' : `Buscar entre ${points.length} puntos`}
+                      aria-label="Buscar punto existente"
+                      value={pointSearch}
+                      disabled={points.length === 0}
+                      onChange={e => { setPointSearch(e.target.value); setShowDropdown(true) }}
+                      onFocus={() => setShowDropdown(true)}
+                      onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
                     />
+                    {showDropdown && filteredPoints.length > 0 && (
+                      <div className={cv.dropdown}>
+                        {filteredPoints.map(p => {
+                          const already = waypoints.some(w => w.point_id === p.point_id)
+                          return (
+                            <button key={p.id} type="button" className={cv.dropItem} disabled={already} onMouseDown={() => !already && addPointAsWaypoint(p)}>
+                              <span className={cv.dropInfo}>
+                                <span className={cv.dropName}>{p.point_name}</span>
+                                <span className={cv.dropMeta}>{p.category} · radio {p.radius} m{already ? ' · ya agregado' : ''}</span>
+                              </span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
+                    {showDropdown && pointSearch && filteredPoints.length === 0 && (
+                      <div className={cv.dropdown}><div className={cv.dropEmpty}>Sin resultados para "{pointSearch}"</div></div>
+                    )}
                   </div>
+                </div>
+              )}
+            </div>
 
-                  {r.isNew && (
-                    <div className={rcStyles.row}>
-                      <div className={rcStyles.field}>
-                        <label className={rcStyles.labelSm}>Categoría</label>
-                        <div className={rcStyles.selectWrap}>
-                          <select
-                            className={rcStyles.select}
-                            value={r.category}
-                            onChange={e => updateFinalizeRow(r.id, 'category', e.target.value)}
-                          >
-                            {POINT_CATEGORIES.map(c => (
-                              <option key={c.value} value={c.value}>{c.label}</option>
-                            ))}
-                          </select>
+            <div className={cv.listHead}>
+              <span className={cv.listTitle}>Puntos de la ruta</span>
+              <span className={cv.count}>{waypoints.length}</span>
+            </div>
+
+            <div className={cv.list}>
+              {waypoints.length === 0 && (
+                <p className={cv.empty}>
+                  {routeMode === 'draw'
+                    ? 'Aún no hay puntos. Haz clic en el mapa o busca una dirección para empezar.'
+                    : 'Aún no hay puntos. Busca uno de tus puntos de interés para agregarlo.'}
+                </p>
+              )}
+              {waypoints.map((wp, idx) => (
+                <div key={wp.id}>
+                  <div className={`${cv.stop} ${expanded === wp.id ? cv.stopOn : ''}`}>
+                    <div className={cv.stopRow} onClick={() => setExpanded(expanded === wp.id ? null : wp.id)}>
+                      <span className={cv.badge}>{idx + 1}</span>
+                      <div className={cv.stopInfo}>
+                        <div className={cv.stopName}>
+                          <span>{wp.name}</span>
+                          {wp.isStart && <span className={cv.tag}>Inicio</span>}
+                        </div>
+                        <div className={cv.stopAddr}>{wp.address}</div>
+                      </div>
+                      <button type="button" className={`${cv.iconBtn} ${cv.iconBtnDanger}`} aria-label={`Quitar ${wp.name}`} onClick={e => { e.stopPropagation(); removeWaypoint(wp.id) }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+                      </button>
+                    </div>
+                    {expanded === wp.id && (
+                      <div className={cv.stopDetails}>
+                        {wp.lat.toFixed(6)}, {wp.lng.toFixed(6)}
+                        <div style={{ marginTop: 8 }}>
+                          <button type="button" className={`${cv.btn} ${cv.btnGhost} ${cv.btnSm}`} onClick={() => setFlyTo([wp.lat, wp.lng])}>Ver en el mapa</button>
                         </div>
                       </div>
-                      <div className={rcStyles.field}>
-                        <label className={rcStyles.labelSm}>Radio (m)</label>
-                        <input
-                          className={rcStyles.inputSm}
-                          type="number"
-                          min="1"
-                          value={r.radius}
-                          onChange={e => updateFinalizeRow(r.id, 'radius', e.target.value)}
-                        />
-                      </div>
-                    </div>
+                    )}
+                  </div>
+                  {legs[idx] && (
+                    <div className={cv.stopLeg}>{legs[idx].km.toFixed(1)} km · {formatDuration(legs[idx].min)}</div>
                   )}
                 </div>
               ))}
             </div>
 
-            {finalizeError && (
-              <div className={rcStyles.finalizeErr}>
-                <span className={rcStyles.alertIcon}>⚠</span>{finalizeError}
+            <div className={cv.panelFoot}>
+              <button type="button" className={`${cv.btn} ${cv.btnGhost}`} onClick={clearAll} disabled={waypoints.length === 0}>Quitar todos los puntos</button>
+            </div>
+          </div>
+
+          {/* Mapa */}
+          <div className={cv.mapArea}>
+            <MapContainer ref={setMap} center={CDMX} zoom={11} style={{ width: '100%', height: '100%' }} zoomControl={false}>
+              <TileLayer
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+              />
+              <MapClickHandler onMapClick={handleMapClick} />
+              {flyTo && <FlyToWaypoint lat={flyTo[0]} lng={flyTo[1]} />}
+              {polyline.length > 1 && (
+                <Polyline positions={polyline} pathOptions={{ color: '#3b82f6', weight: 4, opacity: 0.9 }} />
+              )}
+              {waypoints.map((wp, idx) => (
+                <Marker key={wp.id} position={[wp.lat, wp.lng]} icon={numberedIcon(idx + 1)} eventHandlers={{ click: () => goTo(wp) }} />
+              ))}
+            </MapContainer>
+
+            {routeMode === 'draw' && <div className={cv.mapHint}>Haz clic en el mapa para agregar un punto</div>}
+
+            <div className={cv.mapControls}>
+              <div className={cv.mapBtnGroup}>
+                <button type="button" className={cv.mapBtn} aria-label="Acercar" onClick={() => map?.zoomIn()}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+                </button>
+                <button type="button" className={cv.mapBtn} aria-label="Alejar" onClick={() => map?.zoomOut()}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M5 12h14" /></svg>
+                </button>
+              </div>
+            </div>
+
+            {waypoints.length > 0 && (
+              <div className={cv.legs}>
+                <div className={cv.legsHead}>
+                  <span>Tramos de la ruta</span>
+                  {waypoints.length > 1 && <span><strong>{totalKm.toFixed(1)} km</strong> · {formatDuration(totalMin)} de manejo</span>}
+                </div>
+                <div className={cv.legsScroll}>
+                  {waypoints.map((wp, idx) => (
+                    <div key={wp.id} className={cv.legStep}>
+                      {idx > 0 && legs[idx - 1] && (
+                        <div className={cv.legConn}>
+                          <span>{legs[idx - 1].km.toFixed(1)} km · {formatDuration(legs[idx - 1].min)}</span>
+                          <span className={cv.legLine} />
+                        </div>
+                      )}
+                      <button type="button" className={cv.legNode} onClick={() => goTo(wp)}>
+                        <span className={cv.badge}>{idx + 1}</span>
+                        <span className={cv.legName}>{wp.name}</span>
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
+          </div>
+        </div>
+      </section>
 
-            <div className={rcStyles.finalizeActions}>
-              <button className={rcStyles.finalizeBtnCancel} onClick={() => setShowFinalize(false)} disabled={finalizing}>
-                Cancelar
-              </button>
-              <button className={rcStyles.finalizeBtnConfirm} onClick={confirmFinalize} disabled={finalizing}>
-                {finalizing ? 'Guardando…' : 'Confirmar y guardar ruta'}
+      {saveMsg && (
+        <div className={`${cv.alert} ${saveMsg.type === 'ok' ? cv.alertOk : cv.alertErr}`} role="status">
+          <span aria-hidden="true">{saveMsg.type === 'ok' ? '✓' : '⚠'}</span>
+          {saveMsg.text}
+        </div>
+      )}
+
+      <div className={cv.footerActions}>
+        <button type="button" className={`${cv.btn} ${cv.btnGhost}`} onClick={() => { clearAll(); resetHeader(); setSubmitted(false); setSaveMsg(null); onCancel() }}>Cancelar</button>
+        <button type="button" className={`${cv.btn} ${cv.btnPrimary}`} onClick={openFinalize}>Guardar ruta</button>
+      </div>
+
+      {/* ── Modal: finalizar ruta ── */}
+      {showFinalize && (
+        <div className={cv.overlay}>
+          <div className={cv.dialog} role="dialog" aria-modal="true" aria-labelledby="finalize-title">
+            <div className={cv.dialogHead}>
+              <h3 className={cv.dialogTitle} id="finalize-title">Confirmar puntos de la ruta</h3>
+              <p className={cv.dialogSub}>Revisa el nombre de cada punto. Los puntos nuevos también se guardarán como puntos de interés para reutilizarlos.</p>
+            </div>
+
+            <div className={cv.dialogBody}>
+              {finalizeRows.map((r, idx) => (
+                <div key={r.id} className={cv.pointCard}>
+                  <div className={cv.pointTop}>
+                    <span className={cv.badge}>{idx + 1}</span>
+                    <span className={r.isNew ? cv.pillNew : cv.pillExisting}>{r.isNew ? 'Punto nuevo' : 'Punto existente'}</span>
+                  </div>
+                  <div className={cv.field}>
+                    <label className={cv.label} htmlFor={`fin-name-${r.id}`}>Nombre</label>
+                    <input id={`fin-name-${r.id}`} className={cv.input} value={r.name} placeholder="Nombre del punto" onChange={e => updateFinalizeRow(r.id, 'name', e.target.value)} />
+                  </div>
+                  {r.isNew && (
+                    <div className={cv.pointGrid}>
+                      <div className={cv.field}>
+                        <label className={cv.label} htmlFor={`fin-cat-${r.id}`}>Categoría</label>
+                        <select id={`fin-cat-${r.id}`} className={cv.select} value={r.category} onChange={e => updateFinalizeRow(r.id, 'category', e.target.value)}>
+                          {POINT_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                        </select>
+                      </div>
+                      <div className={cv.field}>
+                        <label className={cv.label} htmlFor={`fin-rad-${r.id}`}>Radio de llegada (m)</label>
+                        <input id={`fin-rad-${r.id}`} className={cv.input} type="number" min="1" value={r.radius} onChange={e => updateFinalizeRow(r.id, 'radius', e.target.value)} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+              {finalizeError && (
+                <div className={`${cv.alert} ${cv.alertErr}`} role="alert"><span aria-hidden="true">⚠</span>{finalizeError}</div>
+              )}
+            </div>
+
+            <div className={cv.dialogFoot}>
+              <button type="button" className={`${cv.btn} ${cv.btnGhost}`} onClick={() => setShowFinalize(false)} disabled={finalizing}>Cancelar</button>
+              <button type="button" className={`${cv.btn} ${cv.btnPrimary}`} onClick={confirmFinalize} disabled={finalizing}>
+                {finalizing ? 'Guardando…' : 'Guardar ruta'}
               </button>
             </div>
           </div>
@@ -1116,11 +1145,12 @@ export default function IndexPage() {
         </header>
 
         {/* Content */}
-        <main className={activeView === 'route-config' ? styles.contentFull : styles.content}>
+        <main className={styles.content}>
           {activeView === 'home'          && <HomeContent />}
           {activeView === 'route-config' && isAdmin && (
             <RouteConfigContent
               onSaved={() => { setRoutesReloadToken(n => n + 1); navTo('my-routes') }}
+              onCancel={() => navTo('my-routes')}
             />
           )}
           {activeView === 'my-routes'     && (
@@ -1135,6 +1165,7 @@ export default function IndexPage() {
           {activeView === 'users'         && <UsersContent />}
           {activeView === 'drivers'       && <DriversContent />}
           {activeView === 'points'        && <PointsContent />}
+          {activeView === 'protocols'     && <ProtocolsContent />}
         </main>
       </div>
     </div>
