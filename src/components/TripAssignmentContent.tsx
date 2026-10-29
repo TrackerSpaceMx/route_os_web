@@ -1,10 +1,12 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useAuth } from '../context/AuthContext'
 import m  from './UsersModal.module.css'
 import ui from './UsersView.module.css'
+import f  from './TripAssignmentForm.module.css'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type TripStatus = 'scheduled' | 'in_progress' | 'completed' | 'cancelled' | string
+type Modal = 'none' | 'create' | 'delete' | 'start'
 
 interface Trip {
   trip_id: string
@@ -32,12 +34,40 @@ interface Stop extends RouteWaypoint {
   expected_arrival: string
 }
 
+interface DriverOption {
+  id: string
+  name: string
+  employee_number: string
+  phone: string
+  phone_secondary: string
+  available: boolean
+}
+
+interface ProtocolOption {
+  id: string
+  name: string
+  is_default: boolean
+}
+
+interface VehicleOption {
+  vehicle_name: string
+  plate: string
+}
+
+type PhoneChoice = '' | 'phone' | 'phone_secondary'
+
 interface TripForm {
   route_id: string
+  driver_id: string
+  folio: string
+  protocol_profile_id: string
+  phone_choice: PhoneChoice
+  vehicle_name: string
+  vehicle_plate: string
   stops: Stop[]
 }
 
-const EMPTY_FORM: TripForm = { route_id: '', stops: [] }
+const EMPTY_FORM: TripForm = { route_id: '', driver_id: '', folio: '', protocol_profile_id: '', phone_choice: '', vehicle_name: '', vehicle_plate: '', stops: [] }
 const API       = 'http://localhost:8084'
 const PAGE_SIZE = 8
 
@@ -88,7 +118,101 @@ const IconTrash  = () => <svg {...P}><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 
 const IconClose  = () => <svg {...P} width={20} height={20}><path d="M18 6 6 18M6 6l12 12"/></svg>
 const IconTruck  = () => <svg {...P}><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.62l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/></svg>
 const IconRoute  = () => <svg {...P}><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/></svg>
+const IconUser   = () => <svg {...P}><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+const IconBadge  = () => <svg {...P}><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="11" r="2"/><path d="M6 17a3 3 0 0 1 6 0M15 9h3M15 13h3"/></svg>
+const IconPhone  = () => <svg {...P}><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z"/></svg>
+const IconShield = () => <svg {...P}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
+const IconPlate  = () => <svg {...P}><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M18 10h.01M8 14h8"/></svg>
 const IconPin    = () => <svg {...P} width={14} height={14}><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+const IconPlay   = () => <svg {...P} width={15} height={15}><polygon points="5 3 19 12 5 21 5 3"/></svg>
+
+// ── Selector con buscador ─────────────────────────────────────────────────────
+interface SelectOption { key: string; label: string; meta?: string; disabled?: boolean; tag?: string }
+
+function SearchSelect({ labelId, icon, placeholder, searchLabel, selectedKey, selectedLabel, options, emptyText, onSelect }: {
+  labelId: string
+  icon: React.ReactNode
+  placeholder: string
+  searchLabel: string
+  selectedKey: string
+  selectedLabel: string
+  options: SelectOption[]
+  emptyText: string
+  onSelect: (key: string) => void
+}) {
+  const [open, setOpen]   = useState(false)
+  const [query, setQuery] = useState('')
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  const matches = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return options.filter(o => !q || o.label.toLowerCase().includes(q) || (o.meta ?? '').toLowerCase().includes(q))
+  }, [options, query])
+
+  return (
+    <div className={f.combo} ref={ref}>
+      <span className={f.inputIcon} style={{ top: 12 }}>{icon}</span>
+      <button
+        type="button"
+        className={`${f.comboBtn} ${f.chev}`}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-labelledby={labelId}
+        onClick={() => { setOpen(o => !o); setQuery('') }}
+      >
+        <span className={selectedLabel ? undefined : f.comboPlaceholder}>{selectedLabel || placeholder}</span>
+      </button>
+
+      {open && (
+        <div className={f.panel}>
+          <div className={f.panelSearch}>
+            <span className={f.inputIcon}><IconSearch /></span>
+            <input
+              autoFocus
+              className={`${f.input} ${f.withIcon}`}
+              placeholder="Buscar…"
+              aria-label={searchLabel}
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Escape') setOpen(false) }}
+            />
+          </div>
+          <div className={f.list} role="listbox" aria-labelledby={labelId}>
+            {matches.length === 0 && (
+              <div className={f.empty}>{options.length === 0 ? emptyText : `Sin resultados para "${query}"`}</div>
+            )}
+            {matches.map(o => (
+              <button
+                key={o.key}
+                type="button"
+                role="option"
+                aria-selected={o.key === selectedKey}
+                disabled={o.disabled}
+                className={`${f.opt} ${o.key === selectedKey ? f.optOn : ''}`}
+                onClick={() => { onSelect(o.key); setOpen(false) }}
+              >
+                <span>
+                  <span className={f.optName}>{o.label}</span>
+                  {o.meta && <><br /><span className={f.optMeta}>{o.meta}</span></>}
+                </span>
+                {o.tag && <span className={f.optTag}>{o.tag}</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 // ── Component ──────────────────────────────────────────────────────────────────
 export default function TripAssignmentContent() {
@@ -102,10 +226,12 @@ export default function TripAssignmentContent() {
   const [page,    setPage]    = useState(1)
 
   const [routeOptions,     setRouteOptions]     = useState<RouteOption[]>([])
+  const [driverOptions,    setDriverOptions]    = useState<DriverOption[]>([])
+  const [vehicleOptions,   setVehicleOptions]   = useState<VehicleOption[]>([])
+  const [protocolOptions,  setProtocolOptions]  = useState<ProtocolOption[]>([])
   const [waypointsLoading, setWaypointsLoading] = useState(false)
   const [waypointsError,   setWaypointsError]   = useState<string | null>(null)
 
-  type Modal = 'none' | 'create' | 'delete'
   const [modal,       setModal]       = useState<Modal>('none')
   const [form,        setForm]        = useState<TripForm>(EMPTY_FORM)
   const [formError,   setFormError]   = useState<string | null>(null)
@@ -126,7 +252,7 @@ export default function TripAssignmentContent() {
       const normalized: Trip[] = raw.map(t => ({
         trip_id:    String(t.trip_id    ?? ''),
         display_id: Number(t.display_id ?? 0),
-        vehicle:    String(t.vehicle    ?? '—'),
+        vehicle:    String(t.vehicle_name ?? t.vehicle ?? '—'),
         status:     String(t.status     ?? 'scheduled'),
         created_at: String(t.created_at ?? ''),
         route:      String(t.route      ?? '—'),
@@ -141,8 +267,9 @@ export default function TripAssignmentContent() {
   }
 
   const fetchCatalogs = async () => {
+    const headers = { Authorization: `Bearer ${token}` }
     try {
-      const res  = await fetch(`${API}/routes`, { headers: { Authorization: `Bearer ${token}` } })
+      const res  = await fetch(`${API}/routes`, { headers })
       const json = await res.json().catch(() => ({}))
       const raw: Record<string, unknown>[] = Array.isArray(json.data) ? json.data : []
       setRouteOptions(raw.map(r => ({
@@ -150,6 +277,45 @@ export default function TripAssignmentContent() {
         route_name: String(r.route_name ?? 'Sin nombre'),
       })))
     } catch { setRouteOptions([]) }
+
+    try {
+      const res = await fetch(`${API}/protocol-profile`, { headers })
+      const json = res.status === 204 ? null : await res.json().catch(() => null)
+      const raw: Record<string, unknown>[] = Array.isArray(json?.data) ? json.data : []
+      const list: ProtocolOption[] = raw.map(x => ({
+        id:         String(x.id ?? ''),
+        name:       String(x.name ?? 'Sin nombre'),
+        is_default: Boolean(x.is_default),
+      })).filter(x => x.id)
+      setProtocolOptions(list)
+      const def = list.find(x => x.is_default)
+      // Preselecciona el protocolo predeterminado, sin pisar lo que la persona ya haya elegido
+      if (def) setForm(p => p.protocol_profile_id ? p : { ...p, protocol_profile_id: def.id })
+    } catch { setProtocolOptions([]) }
+
+    try {
+      const res  = await fetch(`${API}/vehicles`, { headers })
+      const json = await res.json().catch(() => ({}))
+      const raw: Record<string, unknown>[] = Array.isArray(json.data) ? json.data : []
+      setVehicleOptions(raw.map(v => ({
+        vehicle_name: String(v.vehicle_name ?? '').trim(),
+        plate:        String(v.plate ?? '').trim(),
+      })).filter(v => v.vehicle_name))
+    } catch { setVehicleOptions([]) }
+
+    try {
+      const res  = await fetch(`${API}/drivers`, { headers })
+      const json = await res.json().catch(() => ({}))
+      const raw: Record<string, unknown>[] = Array.isArray(json.data) ? json.data : []
+      setDriverOptions(raw.map(d => ({
+        id:              String(d.id ?? ''),
+        name:            String(d.name ?? 'Sin nombre'),
+        employee_number: String(d.employee_number ?? ''),
+        phone:           String(d.phone ?? ''),
+        phone_secondary: String(d.phone_secondary ?? ''),
+        available:       Boolean(d.available ?? true),
+      })))
+    } catch { setDriverOptions([]) }
   }
 
   const fetchRouteWaypoints = async (routeId: string) => {
@@ -191,11 +357,30 @@ export default function TripAssignmentContent() {
   const paginated  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
   useEffect(() => setPage(1), [search])
 
+  const selectedDriver  = driverOptions.find(d => d.id === form.driver_id) ?? null
+  const chosenPhone = selectedDriver && form.phone_choice ? selectedDriver[form.phone_choice] : ''
+  const vehicleKey = (v: VehicleOption) => `${v.plate}||${v.vehicle_name}`
+  const selectedVehicle = vehicleOptions.find(v => v.plate === form.vehicle_plate && v.vehicle_name === form.vehicle_name) ?? null
+
+  const driverSelectOptions: SelectOption[] = driverOptions.map(d => ({
+    key: d.id,
+    label: d.name,
+    meta: d.employee_number ? `No. ${d.employee_number}` : 'Sin número de empleado',
+    disabled: !d.available,
+    tag: d.available ? undefined : 'No disponible',
+  }))
+  const vehicleSelectOptions: SelectOption[] = vehicleOptions.map(v => ({
+    key: vehicleKey(v), label: v.vehicle_name, meta: v.plate ? `Placa ${v.plate}` : 'Sin placa',
+  }))
+
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000) }
+
+  const [startError, setStartError] = useState<string | null>(null)
 
   const openCreate = () => { setForm(EMPTY_FORM); setFormError(null); setWaypointsError(null); setModal('create'); fetchCatalogs() }
   const closeModal = () => setModal('none')
   const openDelete = (t: Trip) => { setSelected(t); setDeleteError(null); setModal('delete') }
+  const openStart  = (t: Trip) => { setSelected(t); setStartError(null); setModal('start') }
 
   const handleRouteChange = (id: string) => { setForm(f => ({ ...f, route_id: id })); fetchRouteWaypoints(id) }
   const updateStop = (i: number, patch: Partial<Pick<Stop, 'dwell_time' | 'expected_arrival'>>) =>
@@ -203,6 +388,14 @@ export default function TripAssignmentContent() {
 
   const handleSubmit = async () => {
     if (!form.route_id) { setFormError('Selecciona una ruta'); return }
+    if (!form.folio.trim()) { setFormError('Escribe el folio del viaje'); return }
+    if (!selectedVehicle) { setFormError('Selecciona un vehículo'); return }
+    if (!selectedVehicle.plate) { setFormError('El vehículo seleccionado no tiene placa registrada'); return }
+    if (!selectedDriver) { setFormError('Selecciona un operador'); return }
+    if (!selectedDriver.employee_number) { setFormError('El operador seleccionado no tiene número de empleado registrado'); return }
+    if (!selectedDriver.phone && !selectedDriver.phone_secondary) { setFormError('El operador seleccionado no tiene teléfono registrado'); return }
+    if (!chosenPhone) { setFormError('Selecciona el teléfono del operador'); return }
+    if (!form.protocol_profile_id) { setFormError('Selecciona un protocolo'); return }
     if (form.stops.length === 0) { setFormError('La ruta no tiene paradas configuradas'); return }
     for (const s of form.stops) {
       const v = Number(s.dwell_time)
@@ -216,7 +409,13 @@ export default function TripAssignmentContent() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
-          route_id: form.route_id,
+          route_id:      form.route_id,
+          folio:         form.folio.trim(),
+          driver_id:     form.driver_id,
+          protocol_profile_id: form.protocol_profile_id,
+          vehicle_name:  selectedVehicle.vehicle_name,
+          vehicle_plate: selectedVehicle.plate,
+          driver_phone:  chosenPhone, // el principal o el secundario del operador, según se elija
           stops: form.stops.map((s, i) => ({
             waypoint_id:      s.waypoint_id,
             sequence_order:   i + 1,
@@ -247,6 +446,25 @@ export default function TripAssignmentContent() {
       await fetchTrips(); closeModal(); showToast('Asignación eliminada correctamente')
     } catch { setDeleteError('Ocurrió un error al intentar eliminar la asignación.') }
     finally { setSubmitting(false) }
+  }
+
+  const handleStartTrip = async () => {
+    if (!selected) return
+    setSubmitting(true); setStartError(null)
+    try {
+      const res = await fetch(`${API}/trip-assigment/${selected.trip_id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ trip_status: 'in_progress' }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => null) as { detail?: string } | null
+        throw new Error(body?.detail ?? 'No se pudo iniciar el viaje')
+      }
+      await fetchTrips(); closeModal(); showToast('Viaje iniciado correctamente')
+    } catch (e: unknown) {
+      setStartError(e instanceof Error ? e.message : 'Error al iniciar el viaje')
+    } finally { setSubmitting(false) }
   }
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -337,6 +555,16 @@ export default function TripAssignmentContent() {
                   {isAdmin && (
                     <td>
                       <div className={ui.actions}>
+                        {trip.status === 'scheduled' && (
+                          <button className={`${ui.action} ${ui.actionStart}`} title="Iniciar viaje" onClick={() => openStart(trip)}>
+                            <IconPlay />
+                          </button>
+                        )}
+                        {trip.status === 'in_progress' && (
+                          <span className={`${ui.badge} ${ui.badgeInProgress}`} style={{ fontSize: 11, padding: '3px 8px' }}>
+                            En curso
+                          </span>
+                        )}
                         <button className={`${ui.action} ${ui.actionDanger}`} title="Eliminar" onClick={() => openDelete(trip)}>
                           <IconTrash />
                         </button>
@@ -360,105 +588,224 @@ export default function TripAssignmentContent() {
         )}
       </div>
 
-      {/* ── Modal: Crear viaje ── */}
+      {/* ── Modal: Crear viaje (solo se cierra con Cancelar o la X) ── */}
       {modal === 'create' && isAdmin && (
         <div className={m.overlay}>
-          <div className={m.dialog} style={{ maxHeight:'calc(100vh - 48px)', display:'flex', flexDirection:'column', overflow:'hidden' }}>
-            <div className={m.header}>
+          <div className={f.dialog} role="dialog" aria-modal="true" aria-labelledby="trip-title">
+            <div className={f.head}>
               <div>
-                <h2 className={m.title}>Nuevo viaje</h2>
-                <p className={m.subtitle}>Selecciona la ruta y configura los tiempos de llegada</p>
+                <h2 className={f.title} id="trip-title">Nuevo viaje</h2>
+                <p className={f.sub}>Asigna ruta, vehículo y operador, y define los tiempos de cada parada.</p>
               </div>
-              <button className={m.close} onClick={closeModal}><IconClose /></button>
+              <button type="button" className={f.close} onClick={closeModal} aria-label="Cerrar"><IconClose /></button>
             </div>
 
-            <div className={m.body} style={{ flex:1, minHeight:0, overflowY:'auto' }}>
-              {formError && <p className={m.error}>{formError}</p>}
+            <div className={f.body}>
+              {formError && <div className={f.alertErr} role="alert"><span aria-hidden="true">⚠</span>{formError}</div>}
 
-              <div className={m.grid}>
-                <div className={`${m.field} ${m.full}`}>
-                  <label className={m.label}>Ruta <span className={m.req}>*</span></label>
-                  <select
-                    className={m.select}
-                    value={form.route_id}
-                    onChange={e => handleRouteChange(e.target.value)}
-                  >
-                    <option value="">Selecciona una ruta</option>
-                    {routeOptions.map(r => (
-                      <option key={r.route_id} value={r.route_id}>{r.route_name}</option>
-                    ))}
-                  </select>
+              {/* Información general */}
+              <section className={f.card}>
+                <div className={f.cardHead}>
+                  <span className={f.cardIcon}><IconTruck /></span>
+                  <h3 className={f.cardTitle}>Información general</h3>
                 </div>
-              </div>
-
-              {form.route_id && (
-                <div style={{ marginTop:20 }}>
-                  <p style={{ margin:'0 0 10px', color:'#94a3b8', fontSize:13, fontWeight:600,
-                    display:'flex', alignItems:'center', gap:6 }}>
-                    <IconPin /> Paradas de la ruta
-                  </p>
-
-                  {waypointsLoading && (
-                    <p style={{ color:'#64748b', fontSize:13, display:'flex', alignItems:'center', gap:6 }}>
-                      <span className={ui.spinner} /> Cargando paradas…
-                    </p>
-                  )}
-                  {waypointsError && <p className={m.error}>{waypointsError}</p>}
-                  {!waypointsLoading && !waypointsError && form.stops.length === 0 && (
-                    <p style={{ color:'#64748b', fontSize:13 }}>Esta ruta no tiene paradas configuradas.</p>
-                  )}
-
-                  {form.stops.map((stop, i) => (
-                    <div key={stop.waypoint_id || i} style={{
-                      border:'1px solid #1e293b', borderRadius:10,
-                      background:'#0f172a', padding:'14px 16px', marginBottom:10,
-                    }}>
-                      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
-                        <span style={{
-                          display:'inline-flex', alignItems:'center', justifyContent:'center',
-                          width:22, height:22, borderRadius:'50%',
-                          background:'#1d4ed8', color:'#fff', fontSize:11, fontWeight:700, flexShrink:0,
-                        }}>{i+1}</span>
-                        <span style={{ color:'#e2e8f0', fontSize:13, fontWeight:500 }}>{stop.name}</span>
-                      </div>
-                      <div className={m.grid}>
-                        <div className={m.field}>
-                          <label className={m.label}>Espera (min) <span className={m.req}>*</span></label>
-                          <input
-                            className={m.input}
-                            type="number" min={0} step={1} placeholder="5"
-                            value={stop.dwell_time}
-                            onChange={e => updateStop(i, { dwell_time: e.target.value.replace(/[.,].*$/, '') })}
-                            onKeyDown={e => { if (e.key==='.' || e.key===',') e.preventDefault() }}
-                          />
-                        </div>
-                        <div className={m.field}>
-                          <label className={m.label}>Llegada estimada <span className={m.req}>*</span></label>
-                          <input
-                            className={m.input}
-                            type="datetime-local"
-                            value={stop.expected_arrival}
-                            onChange={e => updateStop(i, { expected_arrival: e.target.value })}
-                          />
-                        </div>
+                <div className={f.cardBody}>
+                  <div className={f.grid}>
+                    <div className={`${f.field} ${f.span2}`}>
+                      <label className={f.label} htmlFor="trip-route">Ruta<span className={f.req}>*</span></label>
+                      <div className={f.inputWrap}>
+                        <span className={f.inputIcon}><IconRoute /></span>
+                        <select
+                          id="trip-route"
+                          className={`${f.select} ${f.withIcon}`}
+                          value={form.route_id}
+                          onChange={e => handleRouteChange(e.target.value)}
+                        >
+                          <option value="">Selecciona una ruta</option>
+                          {routeOptions.map(r => <option key={r.route_id} value={r.route_id}>{r.route_name}</option>)}
+                        </select>
                       </div>
                     </div>
-                  ))}
+
+                    <div className={f.field}>
+                      <label className={f.label} htmlFor="trip-folio">Folio del viaje<span className={f.req}>*</span></label>
+                      <input
+                        id="trip-folio"
+                        className={`${f.input} ${f.mono}`}
+                        placeholder="Ej. TRP-2026-0153"
+                        maxLength={255}
+                        value={form.folio}
+                        onChange={e => setForm(p => ({ ...p, folio: e.target.value }))}
+                      />
+                    </div>
+
+                    {/* Vehículo (catálogo de /vehicles) */}
+                    <div className={f.field}>
+                      <span className={f.label} id="trip-vehicle-label">Vehículo<span className={f.req}>*</span></span>
+                      <SearchSelect
+                        labelId="trip-vehicle-label"
+                        icon={<IconTruck />}
+                        placeholder="Selecciona un vehículo"
+                        searchLabel="Buscar vehículo"
+                        selectedKey={selectedVehicle ? vehicleKey(selectedVehicle) : ''}
+                        selectedLabel={selectedVehicle?.vehicle_name ?? ''}
+                        options={vehicleSelectOptions}
+                        emptyText="No hay vehículos registrados"
+                        onSelect={key => {
+                          const v = vehicleOptions.find(x => vehicleKey(x) === key)
+                          if (v) setForm(p => ({ ...p, vehicle_name: v.vehicle_name, vehicle_plate: v.plate }))
+                        }}
+                      />
+                    </div>
+
+                    <div className={f.field}>
+                      <label className={f.label} htmlFor="trip-plate">Placa<span className={f.req}>*</span></label>
+                      <div className={f.inputWrap}>
+                        <span className={f.inputIcon}><IconPlate /></span>
+                        <input
+                          id="trip-plate"
+                          className={`${f.input} ${f.withIcon} ${f.readonly} ${f.mono}`}
+                          placeholder="Elige un vehículo"
+                          value={selectedVehicle?.plate ?? ''}
+                          readOnly
+                        />
+                      </div>
+                    </div>
+
+                    {/* Operador */}
+                    <div className={f.field}>
+                      <span className={f.label} id="trip-driver-label">Operador<span className={f.req}>*</span></span>
+                      <SearchSelect
+                        labelId="trip-driver-label"
+                        icon={<IconUser />}
+                        placeholder="Selecciona un operador"
+                        searchLabel="Buscar operador"
+                        selectedKey={form.driver_id}
+                        selectedLabel={selectedDriver?.name ?? ''}
+                        options={driverSelectOptions}
+                        emptyText="No hay operadores registrados"
+                        onSelect={key => setForm(p => ({ ...p, driver_id: key, phone_choice: '' }))}
+                      />
+                    </div>
+
+                    {/* Se completan solos al elegir el operador */}
+                    <div className={f.field}>
+                      <label className={f.label} htmlFor="trip-emp">Número de empleado<span className={f.req}>*</span></label>
+                      <div className={f.inputWrap}>
+                        <span className={f.inputIcon}><IconBadge /></span>
+                        <input
+                          id="trip-emp"
+                          className={`${f.input} ${f.withIcon} ${f.readonly}`}
+                          placeholder="Se completa al elegir operador"
+                          value={selectedDriver?.employee_number ?? ''}
+                          readOnly
+                        />
+                      </div>
+                    </div>
+
+                    <div className={f.field}>
+                      <label className={f.label} htmlFor="trip-phone">Teléfono<span className={f.req}>*</span></label>
+                      <div className={f.inputWrap}>
+                        <span className={f.inputIcon}><IconPhone /></span>
+                        <select
+                          id="trip-phone"
+                          className={`${f.select} ${f.withIcon}`}
+                          value={form.phone_choice}
+                          disabled={!selectedDriver}
+                          onChange={e => setForm(p => ({ ...p, phone_choice: e.target.value as PhoneChoice }))}
+                        >
+                          <option value="">{selectedDriver ? 'Selecciona un teléfono' : 'Primero elige un operador'}</option>
+                          {selectedDriver?.phone && <option value="phone">Principal · {selectedDriver.phone}</option>}
+                          {selectedDriver?.phone_secondary && <option value="phone_secondary">Secundario · {selectedDriver.phone_secondary}</option>}
+                        </select>
+                      </div>
+                      {selectedDriver && !selectedDriver.phone && !selectedDriver.phone_secondary && (
+                        <p className={f.error}>Este operador no tiene teléfonos registrados</p>
+                      )}
+                    </div>
+
+                    <div className={f.field}>
+                      <label className={f.label} htmlFor="trip-protocol">Protocolo<span className={f.req}>*</span></label>
+                      <div className={f.inputWrap}>
+                        <span className={f.inputIcon}><IconShield /></span>
+                        <select
+                          id="trip-protocol"
+                          className={`${f.select} ${f.withIcon}`}
+                          value={form.protocol_profile_id}
+                          disabled={protocolOptions.length === 0}
+                          onChange={e => setForm(p => ({ ...p, protocol_profile_id: e.target.value }))}
+                        >
+                          <option value="">{protocolOptions.length === 0 ? 'Sin protocolos disponibles' : 'Selecciona un protocolo'}</option>
+                          {protocolOptions.map(x => (
+                            <option key={x.id} value={x.id}>{x.name}{x.is_default ? ' (predeterminado)' : ''}</option>
+                          ))}
+                        </select>
+                      </div>
+                      {protocolOptions.length === 0 && <p className={f.error}>Crea un protocolo en la sección Protocolos</p>}
+                    </div>
+                  </div>
                 </div>
+              </section>
+
+              {/* Paradas */}
+              {form.route_id && (
+                <section className={f.card}>
+                  <div className={f.cardHead}>
+                    <span className={f.cardIcon}><IconPin /></span>
+                    <div>
+                      <h3 className={f.cardTitle}>Paradas de la ruta</h3>
+                      <p className={f.cardHint}>Indica cuánto espera el operador y a qué hora debe llegar a cada parada.</p>
+                    </div>
+                  </div>
+                  <div className={f.cardBody}>
+                    {waypointsLoading && <p className={f.loading}><span className={f.spinner} /> Cargando paradas…</p>}
+                    {waypointsError && <p className={f.error}>{waypointsError}</p>}
+                    {!waypointsLoading && !waypointsError && form.stops.length === 0 && (
+                      <p className={f.muted}>Esta ruta no tiene paradas configuradas.</p>
+                    )}
+                    <div className={f.stops}>
+                      {form.stops.map((stop, i) => (
+                        <div key={stop.waypoint_id || i} className={f.stop}>
+                          <div className={f.stopTop}>
+                            <span className={f.badge}>{i + 1}</span>
+                            <span className={f.stopName}>{stop.name}</span>
+                          </div>
+                          <div className={f.stopGrid}>
+                            <div className={f.field}>
+                              <label className={f.label} htmlFor={`stop-dwell-${i}`}>Espera (min)<span className={f.req}>*</span></label>
+                              <input
+                                id={`stop-dwell-${i}`}
+                                className={f.input}
+                                type="number" min={0} step={1} placeholder="5"
+                                value={stop.dwell_time}
+                                onChange={e => updateStop(i, { dwell_time: e.target.value.replace(/[.,].*$/, '') })}
+                                onKeyDown={e => { if (e.key === '.' || e.key === ',') e.preventDefault() }}
+                              />
+                            </div>
+                            <div className={f.field}>
+                              <label className={f.label} htmlFor={`stop-eta-${i}`}>Llegada estimada<span className={f.req}>*</span></label>
+                              <input
+                                id={`stop-eta-${i}`}
+                                className={`${f.input} ${f.dateInput}`}
+                                type="datetime-local"
+                                value={stop.expected_arrival}
+                                onChange={e => updateStop(i, { expected_arrival: e.target.value })}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </section>
               )}
             </div>
 
-            <div className={m.footer}>
-              <button
-                style={{ background:'transparent', border:'1px solid #334155', color:'#94a3b8',
-                  borderRadius:8, padding:'8px 18px', cursor:'pointer', fontSize:14 }}
-                onClick={closeModal} disabled={submitting}
-              >Cancelar</button>
-              <button
-                style={{ background:'#2563eb', color:'#fff', border:'none', borderRadius:8,
-                  padding:'8px 20px', cursor:'pointer', fontSize:14, fontWeight:600 }}
-                onClick={handleSubmit} disabled={submitting}
-              >{submitting ? 'Guardando…' : 'Crear viaje'}</button>
+            <div className={f.foot}>
+              <button type="button" className={`${f.btn} ${f.btnGhost}`} onClick={closeModal} disabled={submitting}>Cancelar</button>
+              <button type="button" className={`${f.btn} ${f.btnPrimary}`} onClick={handleSubmit} disabled={submitting}>
+                {submitting ? 'Guardando…' : 'Crear viaje'}
+              </button>
             </div>
           </div>
         </div>
@@ -495,6 +842,42 @@ export default function TripAssignmentContent() {
                   display:'flex', alignItems:'center', gap:6 }}
                 onClick={handleDelete} disabled={submitting}
               >{submitting ? 'Eliminando…' : <><IconTrash /> Eliminar</>}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Iniciar viaje ── */}
+      {modal === 'start' && isAdmin && selected && (
+        <div className={m.overlay} onClick={e => e.target === e.currentTarget && closeModal()}>
+          <div className={`${m.dialog} ${m.dialogSm}`}>
+            <div className={m.header}>
+              <div>
+                <h2 className={m.title}>Iniciar viaje</h2>
+                <p className={m.subtitle}>El viaje pasará a estado "En curso" y no podrá revertirse.</p>
+              </div>
+              <button className={m.close} onClick={closeModal}><IconClose /></button>
+            </div>
+            <div className={m.body}>
+              {startError && <p className={m.error}>{startError}</p>}
+              <p style={{ color:'#cbd5e1', margin:0 }}>
+                ¿Confirmas que deseas iniciar el viaje{' '}
+                <strong style={{ color:'#f1f5f9' }}>#{selected.display_id}</strong>
+                {selected.route !== '—' && <> — {selected.route}</>}?
+              </p>
+            </div>
+            <div className={m.footer}>
+              <button
+                style={{ background:'transparent', border:'1px solid #334155', color:'#94a3b8',
+                  borderRadius:8, padding:'8px 18px', cursor:'pointer', fontSize:14 }}
+                onClick={closeModal} disabled={submitting}
+              >Cancelar</button>
+              <button
+                style={{ background:'#16a34a', color:'#fff', border:'none', borderRadius:8,
+                  padding:'8px 20px', cursor:'pointer', fontSize:14, fontWeight:600,
+                  display:'flex', alignItems:'center', gap:6, opacity: submitting ? 0.7 : 1 }}
+                onClick={handleStartTrip} disabled={submitting}
+              >{submitting ? 'Iniciando…' : <><IconPlay /> Iniciar viaje</>}</button>
             </div>
           </div>
         </div>

@@ -208,6 +208,7 @@
 }
 .action:hover:not(:disabled) { background: #25292d; color: #f1f5f9; }
 .actionDanger:hover:not(:disabled) { background: #2a1214; color: #f87171; }
+.actionStart:hover:not(:disabled)  { background: #052e16; color: #4ade80; }
 .action:disabled { opacity: 0.3; cursor: not-allowed; }
 
 /* ── Paginación (solo aparece con más de una página) ──────────────────────── */

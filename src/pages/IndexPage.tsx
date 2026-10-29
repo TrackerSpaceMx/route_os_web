@@ -5,6 +5,7 @@ import UsersContent from '../components/UsersContent'
 import PointsContent from '../components/PointsContent'
 import DriversContent from '../components/DriversContent'
 import TripAssignmentContent from '../components/TripAssignmentContent'
+import MonitoringContent from '../components/MonitoringContent'
 import ProtocolsContent from '../components/ProtocolsContent'
 import Sidebar, { VIEW_TITLES } from '../components/Sidebar'
 import type { View } from '../components/Sidebar'
@@ -418,7 +419,6 @@ function RouteConfigContent({ onSaved, onCancel }: { onSaved: () => void; onCanc
   const [clients,   setClients]   = useState<ClientOption[]>([])
   const [clientId,  setClientId]  = useState('')
   const [departure, setDeparture] = useState('')
-  const [folio,     setFolio]     = useState('')
 
   // Load existing points
   useEffect(() => {
@@ -555,7 +555,7 @@ function RouteConfigContent({ onSaved, onCancel }: { onSaved: () => void; onCanc
   const clearAll = () => { setWaypoints([]); setNextId(1); setExpanded(null) }
 
   const resetHeader = () => {
-    setRouteName(''); setDeparture(''); setFolio('')
+    setRouteName(''); setDeparture('')
     if (clients.length !== 1) setClientId('')
   }
 
@@ -686,7 +686,6 @@ function RouteConfigContent({ onSaved, onCancel }: { onSaved: () => void; onCanc
         points: resolvedPoints,
         client_id: client?.id ?? null,
         client_name: client?.name ?? null,
-        folio: folio.trim() || null,
         // La ubicación de inicio es el point_id del primer punto de la ruta
         starting_location: resolvedPoints[0]?.point_id ?? null,
         // datetime-local entrega 'YYYY-MM-DDTHH:mm'; el back espera segundos
@@ -739,6 +738,19 @@ function RouteConfigContent({ onSaved, onCancel }: { onSaved: () => void; onCanc
         </div>
         <div className={cv.cardBody}>
           <div className={cv.grid}>
+            <div className={`${cv.field} ${cv.span2}`}>
+              <label className={cv.label} htmlFor="route-name">Nombre de la ruta<span className={cv.req}>*</span></label>
+              <input
+                id="route-name"
+                className={`${cv.input} ${nameMissing ? cv.inputInvalid : ''}`}
+                placeholder="Ej. Aeropuerto Nacional"
+                value={routeName}
+                onChange={e => setRouteName(e.target.value)}
+                aria-invalid={nameMissing}
+              />
+              {nameMissing && <p className={cv.error}>Escribe un nombre para la ruta</p>}
+            </div>
+
             <div className={cv.field}>
               <label className={cv.label} htmlFor="route-company">Empresa</label>
               <div className={cv.inputWrap}>
@@ -761,18 +773,6 @@ function RouteConfigContent({ onSaved, onCancel }: { onSaved: () => void; onCanc
             </div>
 
             <div className={cv.field}>
-              <label className={cv.label} htmlFor="route-folio">Folio del viaje</label>
-              <input
-                id="route-folio"
-                className={`${cv.input} ${cv.inputMono}`}
-                placeholder="Ej. TRP-2026-0153"
-                value={folio}
-                onChange={e => setFolio(e.target.value)}
-                maxLength={40}
-              />
-            </div>
-
-            <div className={cv.field}>
               <label className={cv.label} htmlFor="route-departure">Salida programada<span className={cv.req}>*</span></label>
               <input
                 id="route-departure"
@@ -783,19 +783,6 @@ function RouteConfigContent({ onSaved, onCancel }: { onSaved: () => void; onCanc
                 aria-invalid={departureMissing}
               />
               {departureMissing && <p className={cv.error}>Indica la fecha y hora de salida</p>}
-            </div>
-
-            <div className={`${cv.field} ${cv.span2}`}>
-              <label className={cv.label} htmlFor="route-name">Nombre de la ruta<span className={cv.req}>*</span></label>
-              <input
-                id="route-name"
-                className={`${cv.input} ${nameMissing ? cv.inputInvalid : ''}`}
-                placeholder="Ej. Aeropuerto Nacional"
-                value={routeName}
-                onChange={e => setRouteName(e.target.value)}
-                aria-invalid={nameMissing}
-              />
-              {nameMissing && <p className={cv.error}>Escribe un nombre para la ruta</p>}
             </div>
 
             <div className={cv.field}>
@@ -1041,7 +1028,7 @@ function RouteConfigContent({ onSaved, onCancel }: { onSaved: () => void; onCanc
           <div className={cv.dialog} role="dialog" aria-modal="true" aria-labelledby="finalize-title">
             <div className={cv.dialogHead}>
               <h3 className={cv.dialogTitle} id="finalize-title">Confirmar puntos de la ruta</h3>
-              <p className={cv.dialogSub}>Revisa el nombre de cada punto. Los puntos nuevos también se guardarán como puntos de interés para reutilizarlos.</p>
+              <p className={cv.dialogSub}>Revisa los puntos de la ruta. Los puntos nuevos también se guardarán como puntos de interés para reutilizarlos.</p>
             </div>
 
             <div className={cv.dialogBody}>
@@ -1053,7 +1040,7 @@ function RouteConfigContent({ onSaved, onCancel }: { onSaved: () => void; onCanc
                   </div>
                   <div className={cv.field}>
                     <label className={cv.label} htmlFor={`fin-name-${r.id}`}>Nombre</label>
-                    <input id={`fin-name-${r.id}`} className={cv.input} value={r.name} placeholder="Nombre del punto" onChange={e => updateFinalizeRow(r.id, 'name', e.target.value)} />
+                    <input id={`fin-name-${r.id}`} className={`${cv.input} ${cv.inputReadonly}`} value={r.name} readOnly />
                   </div>
                   {r.isNew && (
                     <div className={cv.pointGrid}>
@@ -1085,15 +1072,6 @@ function RouteConfigContent({ onSaved, onCancel }: { onSaved: () => void; onCanc
           </div>
         </div>
       )}
-    </div>
-  )
-}
-
-function PlaceholderContent({ title }: { title: string }) {
-  return (
-    <div className={styles.placeholderContent}>
-      <p className={styles.placeholderTitle}>{title}</p>
-      <p className={styles.placeholderSub}>Próximamente disponible</p>
     </div>
   )
 }
@@ -1161,7 +1139,7 @@ export default function IndexPage() {
             />
           )}
           {activeView === 'trip-assignment' && <TripAssignmentContent />}
-          {activeView === 'live-tracking' && <PlaceholderContent title="Live Tracking" />}
+          {activeView === 'live-tracking' && <MonitoringContent />}
           {activeView === 'users'         && <UsersContent />}
           {activeView === 'drivers'       && <DriversContent />}
           {activeView === 'points'        && <PointsContent />}
