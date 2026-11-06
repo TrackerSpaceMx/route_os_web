@@ -1,11 +1,32 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useAuth } from '../context/AuthContext'
+import { MapContainer, TileLayer, Marker, Polyline } from 'react-leaflet'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 import s from './MonitoringContent.module.css'
+
+// Fix leaflet default icons
+delete (L.Icon.Default.prototype as any)._getIconUrl
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+  iconUrl:       'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  shadowUrl:     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+})
 
 const API = 'http://localhost:8084'
 const REFRESH_MS = 300_000   // 5 minutos
 
 // ── Tipos ──────────────────────────────────────────────────────────────────────
+interface Stop {
+  stop_order: number
+  name: string
+  address: string
+  lat: number
+  lng: number
+  scheduled_arrival?: string | null
+  status?: string | null
+}
+
 interface Trip {
   id: string
   displayId: number
@@ -157,6 +178,144 @@ const IconWarn    = () => <svg {...P} width={14} height={14}><path d="M10.29 3.8
 const IconCheck   = () => <svg {...P} width={14} height={14}><circle cx="12" cy="12" r="10" /><path d="m9 12 2 2 4-4" /></svg>
 const IconAlert   = () => <svg {...P} width={14} height={14}><circle cx="12" cy="12" r="10" /><path d="M12 8v4M12 16h.01" /></svg>
 
+// ── Iconos Leaflet ─────────────────────────────────────────────────────────────
+const makeStopIcon = (n: number, done: boolean) =>
+  L.divIcon({
+    className: '',
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+    html: `<div style="
+      width:28px;height:28px;border-radius:50%;
+      background:${done ? '#6b7280' : '#22c55e'};
+      color:#fff;font-weight:700;font-size:12px;
+      display:flex;align-items:center;justify-content:center;
+      border:2px solid ${done ? '#4b5563' : '#16a34a'};
+      box-shadow:0 2px 6px rgba(0,0,0,.45);
+    ">${n}</div>`,
+  })
+
+const vehicleIcon = L.divIcon({
+  className: '',
+  iconSize: [36, 36],
+  iconAnchor: [18, 18],
+  html: `<div style="
+    width:36px;height:36px;border-radius:50%;
+    background:#3b82f6;border:3px solid #fff;
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:0 2px 8px rgba(59,130,246,.6);
+  ">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="1" y="3" width="15" height="13" rx="1"/><path d="M16 8h4l3 5v3h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/>
+    </svg>
+  </div>`,
+})
+
+// ── Panel de mapa ──────────────────────────────────────────────────────────────
+function TripMapView({ trip, token }: { trip: Trip; token: string | null }) {
+  const [stops, setStops]       = useState<Stop[] | null>(null)
+  const [loadingStops, setLoadingStops] = useState(true)
+
+  useEffect(() => {
+    if (!trip.lastLatitude || !trip.lastLongitude) { setLoadingStops(false); return }
+    fetch(`${API}/monitoring/${trip.id}/stops`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(json => {
+        const raw: Record<string, unknown>[] = Array.isArray(json?.data) ? json.data
+          : Array.isArray(json) ? json : []
+        const list: Stop[] = raw.map(r => ({
+          stop_order:        Number(r.stop_order ?? r.order ?? 0),
+          name:              String(r.name ?? r.point_name ?? ''),
+          address:           String(r.address ?? ''),
+          lat:               Number(r.lat ?? r.latitude),
+          lng:               Number(r.lng ?? r.longitude),
+          scheduled_arrival: r.scheduled_arrival as string | null ?? null,
+          status:            r.status as string | null ?? null,
+        })).filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng))
+        setStops(list)
+      })
+      .catch(() => setStops([]))
+      .finally(() => setLoadingStops(false))
+  }, [trip.id, trip.lastLatitude, trip.lastLongitude, token])
+
+  const hasPos = trip.lastLatitude !== null && trip.lastLongitude !== null
+  if (!hasPos) {
+    return <div className={s.mapEmpty}>Sin posición GPS registrada para este viaje</div>
+  }
+
+  const center: [number, number] = [trip.lastLatitude!, trip.lastLongitude!]
+  const polyline: [number, number][] = stops && stops.length > 0
+    ? [...stops.map(p => [p.lat, p.lng] as [number, number]), center]
+    : []
+
+  // Next stop: first stop not done
+  const nextStop = stops?.find(p => p.status !== 'done' && p.status !== 'completed')
+
+  return (
+    <div className={s.mapWrapper}>
+      {/* Barra superior: siguiente punto */}
+      {nextStop && (
+        <div className={s.mapTopBar}>
+          <span className={s.mapTopLabel}>Siguiente punto:</span>
+          <span className={s.mapTopName}>{nextStop.name}</span>
+          {nextStop.scheduled_arrival && (
+            <><span className={s.mapTopSep}>·</span>
+            <span>Llegada prog. {nextStop.scheduled_arrival.slice(11, 16)}</span></>
+          )}
+        </div>
+      )}
+
+      {/* Mapa */}
+      {loadingStops
+        ? <div className={s.mapLoading}>Cargando mapa…</div>
+        : (
+          <MapContainer
+            center={center}
+            zoom={14}
+            className={s.map}
+            zoomControl={true}
+            attributionControl={true}
+          >
+            <TileLayer
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              attribution='© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            />
+
+            {/* Paradas numeradas */}
+            {stops?.map((p, i) => (
+              <Marker
+                key={i}
+                position={[p.lat, p.lng]}
+                icon={makeStopIcon(p.stop_order || i + 1, p.status === 'done' || p.status === 'completed')}
+              />
+            ))}
+
+            {/* Línea de ruta */}
+            {polyline.length > 1 && (
+              <Polyline
+                positions={polyline}
+                pathOptions={{ color: '#22c55e', weight: 3, opacity: 0.85 }}
+              />
+            )}
+
+            {/* Vehículo */}
+            <Marker position={center} icon={vehicleIcon} />
+          </MapContainer>
+        )
+      }
+
+      {/* Leyenda velocidad */}
+      {trip.lastSpeedKmh !== null && (
+        <div className={s.mapFooter}>
+          <span>{trip.lastSpeedKmh} km/h</span>
+          {trip.lastPositionAt && <span>· Posición: {fmtDateTime(trip.lastPositionAt)}</span>}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Subcomponentes ─────────────────────────────────────────────────────────────
 // Aislado para que el contador de segundos no vuelva a pintar toda la lista cada segundo
 function Updated({ lastOk, failed }: { lastOk: number | null; failed: boolean }) {
@@ -189,7 +348,8 @@ function Detail({ label, children }: { label: string; children: React.ReactNode 
   )
 }
 
-function TripRow({ trip, open, onToggle }: { trip: Trip; open: boolean; onToggle: () => void }) {
+function TripRow({ trip, open, onToggle, token }: { trip: Trip; open: boolean; onToggle: () => void; token: string | null }) {
+  const [detailTab, setDetailTab] = useState<'map' | 'route'>('map')
   const meta = statusMeta(trip.status)
   const risk = riskTone(trip.riskScore)
   const atRisk = trip.status === 'at_risk'
@@ -224,12 +384,26 @@ function TripRow({ trip, open, onToggle }: { trip: Trip; open: boolean; onToggle
 
         {/* Estado y riesgo */}
         <div className={`${s.cell} ${s.cellCol}`}>
-          <span className={`${s.pill} ${s[`tone_${meta.tone}`]}`}><i className={s.dot} />{meta.label}</span>
+          <div className={s.statusRow}>
+            <span className={`${s.pill} ${s[`tone_${meta.tone}`]}`}><i className={s.dot} />{meta.label}</span>
+            <span
+              className={`${s.riskChip} ${s[`text_${risk}`]}`}
+              title="Nivel de riesgo del viaje"
+              role="meter"
+              aria-label="Riesgo"
+              aria-valuenow={trip.riskScore}
+              aria-valuemin={0}
+              aria-valuemax={100}
+            >
+              Riesgo {trip.riskScore}%
+            </span>
+          </div>
           <div className={s.riskLine}>
-            <div className={s.bar} role="progressbar" aria-label="Riesgo" aria-valuenow={trip.riskScore} aria-valuemin={0} aria-valuemax={100}>
-              <div className={`${s.barFill} ${s[`fill_${risk}`]}`} style={{ width: `${trip.riskScore}%` }} />
+            <span className={s.riskLabel}>Avance</span>
+            <div className={s.bar} role="progressbar" aria-label="Avance del viaje" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100}>
+              <div className={`${s.barFill} ${progress >= 100 ? s.fill_green : s.fill_blue}`} style={{ width: `${progress}%` }} />
             </div>
-            <span className={`${s.riskNum} ${s[`text_${risk}`]}`}>{trip.riskScore}%</span>
+            <span className={s.riskNum}>{progress}%</span>
           </div>
         </div>
 
@@ -276,25 +450,59 @@ function TripRow({ trip, open, onToggle }: { trip: Trip; open: boolean; onToggle
       </div>
 
       {open && (
-        <div className={s.panel} id={panelId}>
-          <Detail label="Ruta">{trip.routeName || '—'}</Detail>
-          <Detail label="Paradas">
-            {trip.doneStops} de {trip.totalStops} ({progress}%)
-            {trip.delayedStops > 0 && <em className={s.text_red}> · {trip.delayedStops} con retraso</em>}
-          </Detail>
-          <Detail label="ETA">
-            {fmtDateTime(trip.eta)}
-            {trip.etaPlanned && trip.eta && trip.etaPlanned !== trip.eta && <small> (planeada {fmtDateTime(trip.etaPlanned)})</small>}
-          </Detail>
-          <Detail label="Última posición">
-            {trip.lastLatitude !== null && trip.lastLongitude !== null
-              ? <>{trip.lastLatitude.toFixed(5)}, {trip.lastLongitude.toFixed(5)}
-                  {trip.lastSpeedKmh !== null && <> · {trip.lastSpeedKmh} km/h</>}
-                  {trip.lastPositionAt && <small> ({fmtDateTime(trip.lastPositionAt)})</small>}</>
-              : 'Sin posición reportada'}
-          </Detail>
-          <Detail label="Fase">{trip.phase ? statusMeta(trip.phase).label : '—'}</Detail>
-          <Detail label="Estado del viaje">{trip.tripStatus === 'scheduled' ? 'Programado' : trip.tripStatus === 'in_progress' ? 'En curso' : trip.tripStatus || '—'}</Detail>
+        <div className={s.panelOuter} id={panelId}>
+          {/* Tabs */}
+          <div className={s.tabBar}>
+            <button
+              type="button"
+              className={`${s.tab} ${detailTab === 'map' ? s.tabActive : ''}`}
+              onClick={() => setDetailTab('map')}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/>
+                <line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/>
+              </svg>
+              Vista de Mapa
+            </button>
+            <button
+              type="button"
+              className={`${s.tab} ${detailTab === 'route' ? s.tabActive : ''}`}
+              onClick={() => setDetailTab('route')}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>
+              </svg>
+              Vista de Ruta
+            </button>
+          </div>
+
+          {/* Contenido de la pestaña activa */}
+          {detailTab === 'map' && (
+            <TripMapView trip={trip} token={token} />
+          )}
+
+          {detailTab === 'route' && (
+            <div className={s.panel}>
+              <Detail label="Ruta">{trip.routeName || '—'}</Detail>
+              <Detail label="Paradas">
+                {trip.doneStops} de {trip.totalStops} ({progress}%)
+                {trip.delayedStops > 0 && <em className={s.text_red}> · {trip.delayedStops} con retraso</em>}
+              </Detail>
+              <Detail label="ETA">
+                {fmtDateTime(trip.eta)}
+                {trip.etaPlanned && trip.eta && trip.etaPlanned !== trip.eta && <small> (planeada {fmtDateTime(trip.etaPlanned)})</small>}
+              </Detail>
+              <Detail label="Última posición">
+                {trip.lastLatitude !== null && trip.lastLongitude !== null
+                  ? <>{trip.lastLatitude.toFixed(5)}, {trip.lastLongitude.toFixed(5)}
+                      {trip.lastSpeedKmh !== null && <> · {trip.lastSpeedKmh} km/h</>}
+                      {trip.lastPositionAt && <small> ({fmtDateTime(trip.lastPositionAt)})</small>}</>
+                  : 'Sin posición reportada'}
+              </Detail>
+              <Detail label="Fase">{trip.phase ? statusMeta(trip.phase).label : '—'}</Detail>
+              <Detail label="Estado del viaje">{trip.tripStatus === 'scheduled' ? 'Programado' : trip.tripStatus === 'in_progress' ? 'En curso' : trip.tripStatus || '—'}</Detail>
+            </div>
+          )}
         </div>
       )}
     </li>
@@ -468,7 +676,7 @@ export default function MonitoringContent() {
       )}
       {visible.length > 0 && (
         <ul className={s.list}>
-          {visible.map(t => <TripRow key={t.id} trip={t} open={open.has(t.id)} onToggle={() => toggle(t.id)} />)}
+          {visible.map(t => <TripRow key={t.id} trip={t} open={open.has(t.id)} onToggle={() => toggle(t.id)} token={token} />)}
         </ul>
       )}
     </div>

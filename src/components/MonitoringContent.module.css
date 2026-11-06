@@ -218,6 +218,10 @@
 .tone_orange { color: #fb923c; background: #2a1708; border-color: #9a3412; }
 
 .riskLine { display: flex; align-items: center; gap: 12px; width: 100%; }
+.statusRow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.riskChip { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; border: 1px solid currentColor; font-variant-numeric: tabular-nums; }
+.fill_blue  { background: #60a5fa; }
+.riskLabel { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #8b9096; }
 .bar { flex: 1; height: 8px; border-radius: 999px; background: #25292d; overflow: hidden; }
 .barFill { height: 100%; border-radius: 999px; transition: width 0.4s ease; }
 .fill_green { background: #22c55e; }
@@ -336,4 +340,97 @@
   .rowMain { grid-template-columns: 1fr; }
   .panel { grid-template-columns: 1fr; }
   .title { font-size: 22px; }
+}
+/* ── Panel con tabs ───────────────────────────────────────────────────────── */
+.panelOuter {
+  border-top: 1px solid #27374c;
+  background: rgba(27, 29, 30, 0.6);
+  border-radius: 0 0 14px 14px;
+  overflow: hidden;
+}
+
+.tabBar {
+  display: flex;
+  gap: 2px;
+  padding: 10px 16px 0;
+  background: rgba(15, 20, 30, 0.5);
+  border-bottom: 1px solid #27374c;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #8b97ad;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  border-radius: 6px 6px 0 0;
+  transition: color .15s, background .15s;
+  margin-bottom: -1px;
+}
+.tab:hover { color: #c8d0dc; background: rgba(255,255,255,.04); }
+.tabActive {
+  color: #e8eaed;
+  border-bottom-color: #3b82f6;
+  background: rgba(59, 130, 246, .08);
+}
+
+/* ── Mapa ─────────────────────────────────────────────────────────────────── */
+.mapWrapper {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.map {
+  height: 320px;
+  width: 100%;
+  z-index: 0;
+  background: #111827;
+}
+
+.mapTopBar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  font-size: 13px;
+  color: #c8d0dc;
+  background: rgba(15, 20, 30, 0.8);
+  border-bottom: 1px solid #27374c;
+}
+.mapTopLabel { color: #8b97ad; font-weight: 500; }
+.mapTopName  { font-weight: 600; color: #e8eaed; }
+.mapTopSep   { color: #4b5563; }
+
+.mapFooter {
+  display: flex;
+  gap: 10px;
+  padding: 7px 16px;
+  font-size: 12px;
+  color: #8b97ad;
+  background: rgba(15, 20, 30, 0.6);
+  border-top: 1px solid #27374c;
+}
+
+.mapLoading {
+  height: 320px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #8b97ad;
+  font-size: 14px;
+  background: #111827;
+}
+
+.mapEmpty {
+  padding: 40px 20px;
+  text-align: center;
+  color: #8b97ad;
+  font-size: 14px;
 }
