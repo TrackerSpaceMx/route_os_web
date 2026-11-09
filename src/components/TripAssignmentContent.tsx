@@ -64,10 +64,11 @@ interface TripForm {
   phone_choice: PhoneChoice
   vehicle_name: string
   vehicle_plate: string
+  scheduled_departure: string   // datetime-local: 'YYYY-MM-DDTHH:mm'
   stops: Stop[]
 }
 
-const EMPTY_FORM: TripForm = { route_id: '', driver_id: '', folio: '', protocol_profile_id: '', phone_choice: '', vehicle_name: '', vehicle_plate: '', stops: [] }
+const EMPTY_FORM: TripForm = { route_id: '', driver_id: '', folio: '', protocol_profile_id: '', phone_choice: '', vehicle_name: '', vehicle_plate: '', scheduled_departure: '', stops: [] }
 const API       = 'http://localhost:8084'
 const PAGE_SIZE = 8
 
@@ -389,6 +390,7 @@ export default function TripAssignmentContent() {
   const handleSubmit = async () => {
     if (!form.route_id) { setFormError('Selecciona una ruta'); return }
     if (!form.folio.trim()) { setFormError('Escribe el folio del viaje'); return }
+    if (!form.scheduled_departure) { setFormError('Indica la salida programada'); return }
     if (!selectedVehicle) { setFormError('Selecciona un vehículo'); return }
     if (!selectedVehicle.plate) { setFormError('El vehículo seleccionado no tiene placa registrada'); return }
     if (!selectedDriver) { setFormError('Selecciona un operador'); return }
@@ -411,6 +413,7 @@ export default function TripAssignmentContent() {
         body: JSON.stringify({
           route_id:      form.route_id,
           folio:         form.folio.trim(),
+          scheduled_departure: toApiDateTime(form.scheduled_departure),
           driver_id:     form.driver_id,
           protocol_profile_id: form.protocol_profile_id,
           vehicle_name:  selectedVehicle.vehicle_name,
@@ -636,6 +639,17 @@ export default function TripAssignmentContent() {
                         maxLength={255}
                         value={form.folio}
                         onChange={e => setForm(p => ({ ...p, folio: e.target.value }))}
+                      />
+                    </div>
+
+                    <div className={f.field}>
+                      <label className={f.label} htmlFor="trip-departure">Salida programada<span className={f.req}>*</span></label>
+                      <input
+                        id="trip-departure"
+                        className={`${f.input} ${f.dateInput}`}
+                        type="datetime-local"
+                        value={form.scheduled_departure}
+                        onChange={e => setForm(p => ({ ...p, scheduled_departure: e.target.value }))}
                       />
                     </div>
 

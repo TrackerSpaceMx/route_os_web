@@ -418,7 +418,6 @@ function RouteConfigContent({ onSaved, onCancel }: { onSaved: () => void; onCanc
   interface ClientOption { id: string | number; name: string }
   const [clients,   setClients]   = useState<ClientOption[]>([])
   const [clientId,  setClientId]  = useState('')
-  const [departure, setDeparture] = useState('')
 
   // Load existing points
   useEffect(() => {
@@ -555,7 +554,7 @@ function RouteConfigContent({ onSaved, onCancel }: { onSaved: () => void; onCanc
   const clearAll = () => { setWaypoints([]); setNextId(1); setExpanded(null) }
 
   const resetHeader = () => {
-    setRouteName(''); setDeparture('')
+    setRouteName('')
     if (clients.length !== 1) setClientId('')
   }
 
@@ -590,7 +589,6 @@ function RouteConfigContent({ onSaved, onCancel }: { onSaved: () => void; onCanc
   const openFinalize = () => {
     setSubmitted(true)
     if (!routeName.trim())        return setSaveMsg({ type: 'err', text: 'Escribe un nombre para la ruta.' })
-    if (!departure)               return setSaveMsg({ type: 'err', text: 'Indica la salida programada.' })
     if (waypoints.length < 2)     return setSaveMsg({ type: 'err', text: 'Agrega al menos 2 puntos.' })
 
     setSaveMsg(null)
@@ -688,8 +686,6 @@ function RouteConfigContent({ onSaved, onCancel }: { onSaved: () => void; onCanc
         client_name: client?.name ?? null,
         // La ubicación de inicio es el point_id del primer punto de la ruta
         starting_location: resolvedPoints[0]?.point_id ?? null,
-        // datetime-local entrega 'YYYY-MM-DDTHH:mm'; el back espera segundos
-        scheduled_departure: departure.length === 16 ? `${departure}:00` : departure,
       }
 
       const res = await fetch(`${API}/routes`, {
@@ -712,7 +708,6 @@ function RouteConfigContent({ onSaved, onCancel }: { onSaved: () => void; onCanc
 
   const polyline: [number, number][] = waypoints.map(w => [w.lat, w.lng])
   const nameMissing = submitted && !routeName.trim()
-  const departureMissing = submitted && !departure
 
   const goTo = (wp: Waypoint) => { setFlyTo([wp.lat, wp.lng]); setExpanded(wp.id) }
 
@@ -770,19 +765,6 @@ function RouteConfigContent({ onSaved, onCancel }: { onSaved: () => void; onCanc
                   {clients.map(c => <option key={String(c.id)} value={String(c.id)}>{c.name}</option>)}
                 </select>
               </div>
-            </div>
-
-            <div className={cv.field}>
-              <label className={cv.label} htmlFor="route-departure">Salida programada<span className={cv.req}>*</span></label>
-              <input
-                id="route-departure"
-                type="datetime-local"
-                className={`${cv.input} ${cv.inputDate} ${departureMissing ? cv.inputInvalid : ''}`}
-                value={departure}
-                onChange={e => setDeparture(e.target.value)}
-                aria-invalid={departureMissing}
-              />
-              {departureMissing && <p className={cv.error}>Indica la fecha y hora de salida</p>}
             </div>
 
             <div className={cv.field}>

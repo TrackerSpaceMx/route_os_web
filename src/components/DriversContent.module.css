@@ -315,3 +315,37 @@ div.detailDialog { max-width: 720px; }
 .detailFull { grid-column: 1 / -1; }
 .detailNotes { align-items: stretch; font-weight: 400; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .detailNotesEmpty { color: #9aa4b5; font-style: italic; }
+
+/* ── Pestañas del detalle ─────────────────────────────────────────────────── */
+.detailTabs {
+  display: flex; gap: 4px; padding: 4px; align-self: flex-start; max-width: 100%;
+  border: 1px solid #2a2f36; border-radius: 10px; background: #17191b; overflow-x: auto;
+}
+.detailTab {
+  display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px;
+  border: 0; border-radius: 8px; background: transparent; color: #8b97ad;
+  font: inherit; font-size: 14px; font-weight: 500; white-space: nowrap; cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.detailTab:hover { color: #e2e8f0; }
+.detailTab:focus-visible { outline: 2px solid #3b82f6; outline-offset: 1px; }
+.detailTabActive { background: #25292d; color: #f1f5f9; }
+
+/* ── Historial de viajes ──────────────────────────────────────────────────── */
+.tripsCard { margin: 0; }
+.tripsScroll { max-height: 340px; overflow: auto; }
+.tripsScroll thead th { position: sticky; top: 0; z-index: 1; background: #1a1c1e; }
+.tripFolio { font-weight: 600; color: #60a5fa; white-space: nowrap; }
+.tripVehicle { font-weight: 600; color: #e8eaed; white-space: nowrap; }
+.tripPlate { margin-top: 2px; font-size: 12px; color: #8b97ad; font-family: ui-monospace, 'Roboto Mono', monospace; }
+.tripDate { white-space: nowrap; color: #cbd5e1; }
+.tripScheduled { background: #1f2937; color: #cbd5e1; border: 1px solid #374151; }
+.tripInProgress { background: #0a1929; color: #60a5fa; border: 1px solid #1e3a5f; }
+.tripCompleted { background: #052e16; color: #4ade80; border: 1px solid #166534; }
+.tripCancelled { background: #2a0d0d; color: #fca5a5; border: 1px solid #7f1d1d; }
+.tripsState {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+  padding: 36px 16px; text-align: center; color: #8b97ad; font-size: 14px;
+  border: 1px dashed #2a2f36; border-radius: 10px;
+}
+.tripsState p { margin: 0; }

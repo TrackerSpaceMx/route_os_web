@@ -77,6 +77,12 @@ const IconUserPlus = () => (
     <path d="M19 8v6M22 11h-6" />
   </svg>
 )
+const IconUser = () => (
+  <svg {...svgProps} width={16} height={16}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
+)
+const IconHistory = () => (
+  <svg {...svgProps} width={16} height={16}><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /><path d="M12 7v5l4 2" /></svg>
+)
 const IconClose = () => (
   <svg {...svgProps} width={20} height={20}><path d="M18 6 6 18M6 6l12 12" /></svg>
 )
@@ -190,6 +196,126 @@ async function uploadPhoto(file: File, token: string | null): Promise<string> {
   return photo_id as string
 }
 
+// ── Historial de viajes del conductor ──────────────────────────────────────────
+interface DriverTrip {
+  folio: string
+  vehicleName: string
+  vehiclePlate: string
+  scheduledDeparture: string | null
+  expectedArrival: string | null
+  status: string
+}
+
+const TRIP_STATUS: Record<string, { label: string; cls: string }> = {
+  scheduled:   { label: 'Programado', cls: dc.tripScheduled },
+  in_progress: { label: 'En curso',   cls: dc.tripInProgress },
+  completed:   { label: 'Completado', cls: dc.tripCompleted },
+  cancelled:   { label: 'Cancelado',  cls: dc.tripCancelled },
+}
+
+const fmtTripDate = (iso: string | null) => {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleString('es-MX', {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).replace('.', '')
+}
+
+function DriverTrips({ driverId, token }: { driverId: string; token: string | null }) {
+  const [trips, setTrips]   = useState<DriverTrip[] | null>(null)
+  const [error, setError]   = useState<string | null>(null)
+  const [attempt, setAttempt] = useState(0)
+
+  useEffect(() => {
+    const ctrl = new AbortController()
+    setTrips(null)
+    setError(null)
+    fetch(`${API}/drivers/${driverId}/trips`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: ctrl.signal,
+    })
+      .then(res => {
+        if (res.status === 401) throw new Error('Tu sesión expiró. Vuelve a iniciar sesión.')
+        if (!res.ok) throw new Error(`No se pudo cargar el historial (código ${res.status})`)
+        return res.status === 204 ? null : res.json()
+      })
+      .then(json => {
+        const raw: Record<string, unknown>[] = Array.isArray(json?.data) ? json.data : []
+        const list: DriverTrip[] = raw.map(r => ({
+          folio:              String(r.folio ?? ''),
+          vehicleName:        String(r.vehicle_name ?? ''),
+          // el backend hoy manda "vechile_plate" (con typo); se aceptan ambas
+          vehiclePlate:       String(r.vehicle_plate ?? r.vechile_plate ?? ''),
+          scheduledDeparture: (r.scheduled_departure as string | null) ?? null,
+          expectedArrival:    (r.expected_arrival as string | null) ?? null,
+          status:             String(r.status ?? ''),
+        }))
+        // Más recientes primero
+        list.sort((a, b) => (b.scheduledDeparture ?? '').localeCompare(a.scheduledDeparture ?? ''))
+        setTrips(list)
+      })
+      .catch(err => {
+        if ((err as Error).name === 'AbortError') return
+        setError(err instanceof Error ? err.message : 'No se pudo cargar el historial')
+      })
+    return () => ctrl.abort()
+  }, [driverId, token, attempt])
+
+  if (error) {
+    return (
+      <div className={dc.tripsState} role="alert">
+        <p>{error}</p>
+        <button type="button" className={`${m.btn} ${m.btnGhost}`} onClick={() => setAttempt(a => a + 1)}>Reintentar</button>
+      </div>
+    )
+  }
+  if (trips === null) {
+    return <div className={dc.tripsState}><span className={ui.spinner} />Cargando historial...</div>
+  }
+  if (trips.length === 0) {
+    return <div className={dc.tripsState}>Este conductor aún no tiene viajes asignados.</div>
+  }
+
+  return (
+    <div className={`${ui.tableCard} ${dc.tripsCard}`}>
+      <div className={`${ui.tableScroll} ${dc.tripsScroll}`}>
+        <table className={ui.table}>
+          <thead>
+            <tr>
+              <th>Folio</th>
+              <th>Vehículo</th>
+              <th>Salida programada</th>
+              <th>Llegada estimada</th>
+              <th>Estado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {trips.map((tr, i) => {
+              const st = TRIP_STATUS[tr.status] ?? { label: tr.status || '—', cls: dc.tripScheduled }
+              return (
+                <tr key={`${tr.folio}-${i}`}>
+                  <td className={dc.tripFolio}>{tr.folio || '—'}</td>
+                  <td>
+                    <div className={dc.tripVehicle}>{tr.vehicleName || tr.vehiclePlate || '—'}</div>
+                    {tr.vehiclePlate && tr.vehiclePlate !== tr.vehicleName && (
+                      <div className={dc.tripPlate}>{tr.vehiclePlate}</div>
+                    )}
+                  </td>
+                  <td className={dc.tripDate}>{fmtTripDate(tr.scheduledDeparture)}</td>
+                  <td className={dc.tripDate}>{fmtTripDate(tr.expectedArrival)}</td>
+                  <td><span className={`${dc.statusBadge} ${st.cls}`}>{st.label}</span></td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 // ── Component ──────────────────────────────────────────────────────────────────
 export default function DriversContent() {
   const { token, user: currentUser } = useAuth()
@@ -205,6 +331,7 @@ export default function DriversContent() {
   type Modal = 'none' | 'create' | 'edit' | 'delete' | 'view'
   const [modal,       setModal]      = useState<Modal>('none')
   const [selected,    setSelected]   = useState<Driver | null>(null)
+  const [detailTab,   setDetailTab]  = useState<'info' | 'trips'>('info')
   const [form,        setForm]       = useState<DriverForm>(EMPTY_FORM)
   const [formError,   setFormError]  = useState<string | null>(null)
   const [submitting,  setSubmitting] = useState(false)
@@ -308,7 +435,7 @@ export default function DriversContent() {
     setFormError(null)
     setModal('edit')
   }
-  const openView = (driver: Driver) => { setSelected(driver); setModal('view') }
+  const openView = (driver: Driver) => { setSelected(driver); setDetailTab('info'); setModal('view') }
   const openDelete = (driver: Driver) => { setSelected(driver); setDeleteError(null); setModal('delete') }
   const closeModal = () => {
     setModal('none')
@@ -806,7 +933,23 @@ export default function DriversContent() {
               </div>
 
               <div className={m.body}>
-                <dl className={dc.detailGrid}>
+                <div className={dc.detailTabs} role="tablist" aria-label="Secciones del conductor">
+                  <button
+                    type="button" role="tab" aria-selected={detailTab === 'info'}
+                    className={`${dc.detailTab} ${detailTab === 'info' ? dc.detailTabActive : ''}`}
+                    onClick={() => setDetailTab('info')}
+                  ><IconUser /> Información general</button>
+                  <button
+                    type="button" role="tab" aria-selected={detailTab === 'trips'}
+                    className={`${dc.detailTab} ${detailTab === 'trips' ? dc.detailTabActive : ''}`}
+                    onClick={() => setDetailTab('trips')}
+                  ><IconHistory /> Historial de viajes</button>
+                </div>
+
+                {detailTab === 'trips' ? (
+                  <div role="tabpanel"><DriverTrips driverId={selected.id} token={token} /></div>
+                ) : (
+                <dl className={dc.detailGrid} role="tabpanel">
                   <div>
                     <dt className={dc.detailLabel}>Número de empleado</dt>
                     <dd className={`${dc.detailValue} ${dc.mono}`}>{selected.employeeNumber || '—'}</dd>
@@ -858,6 +1001,7 @@ export default function DriversContent() {
                     </dd>
                   </div>
                 </dl>
+                )}
               </div>
 
               <div className={m.footer}>

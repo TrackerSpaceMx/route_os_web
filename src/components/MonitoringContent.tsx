@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { Fragment, useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useAuth } from '../context/AuthContext'
-import { MapContainer, TileLayer, Marker, Polyline } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Polyline, Tooltip, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import s from './MonitoringContent.module.css'
@@ -59,6 +59,7 @@ interface Trip {
   openEvents: number
   status: string          // display_status
   onSchedule: boolean
+  hideInMin: number | null   // solo viajes completados/cancelados: minutos que faltan para ocultarse
 }
 
 interface Summary { active: number; atRisk: number; logistic: number; pending: number }
@@ -107,6 +108,7 @@ function normalizeTrip(r: Record<string, unknown>): Trip {
     openEvents:        num(r.open_events),
     status:            str(r.display_status, 'in_progress'),
     onSchedule:        r.on_schedule === true || Number(r.on_schedule) === 1,
+    hideInMin:         numOrNull(r.hide_in_min),
   }
 }
 
@@ -157,7 +159,19 @@ const STATUS_META: Record<string, { label: string; tone: Tone }> = {
   logistic:    { label: 'Logístico',           tone: 'green'  },
   unloading:   { label: 'Descarga',            tone: 'orange' },
   in_progress: { label: 'En curso',            tone: 'blue'   },
+  completed:   { label: 'Completado',          tone: 'green'  },
+  cancelled:   { label: 'Cancelado',           tone: 'red'    },
 }
+
+const TRIP_STATUS_LABEL: Record<string, string> = {
+  scheduled:   'Programado',
+  in_progress: 'En curso',
+  completed:   'Completado',
+  cancelled:   'Cancelado',
+}
+
+const fmtHideIn = (min: number) =>
+  min <= 1 ? 'Se ocultará en menos de 1 min' : `Se ocultará en ~${min} min`
 
 function statusMeta(status: string): { label: string; tone: Tone } {
   if (STATUS_META[status]) return STATUS_META[status]
@@ -196,36 +210,87 @@ const makeStopIcon = (n: number, done: boolean) =>
 
 const vehicleIcon = L.divIcon({
   className: '',
-  iconSize: [36, 36],
-  iconAnchor: [18, 18],
-  html: `<div style="
-    width:36px;height:36px;border-radius:50%;
-    background:#3b82f6;border:3px solid #fff;
-    display:flex;align-items:center;justify-content:center;
-    box-shadow:0 2px 8px rgba(59,130,246,.6);
-  ">
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <rect x="1" y="3" width="15" height="13" rx="1"/><path d="M16 8h4l3 5v3h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/>
-    </svg>
+  iconSize: [52, 52],
+  iconAnchor: [26, 26],
+  html: `<div style="position:relative;width:52px;height:52px;">
+    <style>
+      @keyframes rosPulse{0%{transform:scale(.55);opacity:.75}100%{transform:scale(1.7);opacity:0}}
+      .ros-pulse{animation:rosPulse 1.8s ease-out infinite}
+      @media (prefers-reduced-motion: reduce){.ros-pulse{animation:none;opacity:.35}}
+    </style>
+    <span class="ros-pulse" style="position:absolute;inset:0;border-radius:50%;background:rgba(37,99,235,.55);"></span>
+    <div style="
+      position:absolute;inset:6px;border-radius:50%;
+      background:#2563eb;border:3px solid #fff;
+      display:flex;align-items:center;justify-content:center;
+      box-shadow:0 0 0 2px #1d4ed8,0 4px 12px rgba(0,0,0,.55);
+    ">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="1" y="3" width="15" height="13" rx="1"/><path d="M16 8h4l3 5v3h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/>
+      </svg>
+    </div>
   </div>`,
 })
 
+// Color de la línea que une las paradas (cámbialo aquí si prefieres otro)
+const ROUTE_COLOR = '#7c3aed'
+
+// Encuadra todos los puntos (paradas + vehículo) una sola vez al abrir el mapa.
+// No se vuelve a ejecutar con cada actualización de GPS, para no quitarle el zoom al usuario.
+function FitAll({ points }: { points: [number, number][] }) {
+  const map = useMap()
+  useEffect(() => {
+    if (points.length === 0) return
+    map.fitBounds(L.latLngBounds(points), { padding: [50, 50], maxZoom: 16 })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  return null
+}
+
+// Parada: hover muestra el nombre, click hace zoom hacia ella
+function StopMarker({ stop, index, done }: { stop: Stop; index: number; done: boolean }) {
+  const map = useMap()
+  const n = stop.stop_order || index + 1
+  return (
+    <Marker
+      position={[stop.lat, stop.lng]}
+      icon={makeStopIcon(n, done)}
+      zIndexOffset={1000}
+      eventHandlers={{
+        click: () => map.flyTo([stop.lat, stop.lng], 17, { duration: 0.8 }),
+      }}
+    >
+      <Tooltip direction="top" offset={[0, -14]}>
+        <strong>{n}. {stop.name || 'Parada'}</strong>
+        {stop.scheduled_arrival && <><br />Llegada prog. {stop.scheduled_arrival.slice(11, 16)}</>}
+      </Tooltip>
+    </Marker>
+  )
+}
+
 // ── Panel de mapa ──────────────────────────────────────────────────────────────
-function TripMapView({ trip, token }: { trip: Trip; token: string | null }) {
-  const [stops, setStops]       = useState<Stop[] | null>(null)
-  const [loadingStops, setLoadingStops] = useState(true)
+// ── Paradas del viaje (compartido por la vista de mapa y la de ruta) ───────────
+const isStopDone = (p: Stop, i: number, doneStops: number) =>
+  p.status === 'done' || p.status === 'completed' || i < doneStops
+
+function useTripStops(tripId: string, doneStops: number, token: string | null, enabled: boolean, refreshKey = 0) {
+  const [stops, setStops] = useState<Stop[] | null>(null)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!trip.lastLatitude || !trip.lastLongitude) { setLoadingStops(false); return }
-    fetch(`${API}/monitoring/${trip.id}/stops`, {
+    if (!enabled) return
+    let cancelled = false
+    fetch(`${API}/monitoring/${tripId}/stops`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then(r => r.ok ? r.json() : null)
       .then(json => {
+        if (cancelled) return
+        if (json === null) { setStops(prev => prev ?? []); return }   // error: conserva lo ya cargado
         const raw: Record<string, unknown>[] = Array.isArray(json?.data) ? json.data
           : Array.isArray(json) ? json : []
         const list: Stop[] = raw.map(r => ({
-          stop_order:        Number(r.stop_order ?? r.order ?? 0),
+          stop_order:        Number(r.stop_sequence ?? r.stop_order ?? r.order ?? 0),
           name:              String(r.name ?? r.point_name ?? ''),
           address:           String(r.address ?? ''),
           lat:               Number(r.lat ?? r.latitude),
@@ -233,11 +298,142 @@ function TripMapView({ trip, token }: { trip: Trip; token: string | null }) {
           scheduled_arrival: r.scheduled_arrival as string | null ?? null,
           status:            r.status as string | null ?? null,
         })).filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng))
+          .sort((a, b) => a.stop_order - b.stop_order)
         setStops(list)
       })
-      .catch(() => setStops([]))
-      .finally(() => setLoadingStops(false))
-  }, [trip.id, trip.lastLatitude, trip.lastLongitude, token])
+      .catch(() => { if (!cancelled) setStops(prev => prev ?? []) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [tripId, doneStops, token, enabled, refreshKey])
+
+  return { stops, loading }
+}
+
+// ── Geometría para la línea de tiempo ──────────────────────────────────────────
+type LatLng = [number, number]
+const toRad = (d: number) => (d * Math.PI) / 180
+
+// Distancia en línea recta (no por carretera)
+function haversineKm(a: LatLng, b: LatLng): number {
+  const dLat = toRad(b[0] - a[0]), dLng = toRad(b[1] - a[1])
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a[0])) * Math.cos(toRad(b[0])) * Math.sin(dLng / 2) ** 2
+  return 2 * 6371 * Math.asin(Math.sqrt(h))
+}
+
+// Qué tan avanzado (0–1) está el punto p sobre el segmento a→b
+function projectT(p: LatLng, a: LatLng, b: LatLng): number {
+  const k = Math.cos(toRad(a[0]))
+  const bx = (b[1] - a[1]) * k, by = b[0] - a[0]
+  const px = (p[1] - a[1]) * k, py = p[0] - a[0]
+  const len2 = bx * bx + by * by
+  return len2 === 0 ? 0 : Math.max(0, Math.min(1, (px * bx + py * by) / len2))
+}
+
+const fmtKm = (km: number) => (km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(1)} km`)
+
+function fmtDuration(min: number): string {
+  if (!Number.isFinite(min) || min <= 0) return ''
+  const t = Math.round(min)
+  if (t < 60) return `${t} min`
+  if (t < 1440) { const h = Math.floor(t / 60), m = t % 60; return m ? `${h} h ${m} min` : `${h} h` }
+  const hrs = Math.round(t / 60), d = Math.floor(hrs / 24), h = hrs % 24
+  return h ? `${d} d ${h} h` : `${d} d`
+}
+
+function minutesBetween(a?: string | null, b?: string | null): number {
+  if (!a || !b) return 0
+  const x = new Date(a).getTime(), y = new Date(b).getTime()
+  return Number.isFinite(x) && Number.isFinite(y) ? (y - x) / 60000 : 0
+}
+
+// ── Vista de ruta: línea de tiempo horizontal ──────────────────────────────────
+function RouteTimeline({ trip, stops, loading }: { trip: Trip; stops: Stop[] | null; loading: boolean }) {
+  if (loading) return <div className={s.routeEmpty}>Cargando ruta…</div>
+  if (!stops || stops.length === 0) return <div className={s.routeEmpty}>Este viaje no tiene paradas registradas</div>
+
+  const done = stops.map((p, i) => isStopDone(p, i, trip.doneStops))
+  const nextIdx = done.findIndex(d => !d)            // -1 = todas completadas
+  const nextStop = nextIdx >= 0 ? stops[nextIdx] : null
+  const pts = stops.map(p => [p.lat, p.lng] as LatLng)
+  const veh: LatLng | null = trip.lastLatitude !== null && trip.lastLongitude !== null
+    ? [trip.lastLatitude, trip.lastLongitude] : null
+
+  // Dónde está el vehículo: entre la última parada hecha y la siguiente
+  let seg: { index: number; t: number; kmPrev: number; kmNext: number } | null = null
+  let note: string | null = null
+  if (veh) {
+    if (nextIdx > 0) {
+      const a = pts[nextIdx - 1], b = pts[nextIdx]
+      seg = { index: nextIdx - 1, t: projectT(veh, a, b), kmPrev: haversineKm(veh, a), kmNext: haversineKm(veh, b) }
+    } else if (nextIdx === 0) {
+      note = `Vehículo a ~${fmtKm(haversineKm(veh, pts[0]))} del primer punto`
+    } else {
+      const last = stops[stops.length - 1]
+      const km = haversineKm(veh, pts[pts.length - 1])
+      const lastName = last.name || 'la última parada'
+      note = km < 0.2
+        ? `Todas las paradas completadas · vehículo en ${lastName}`
+        : `Todas las paradas completadas · vehículo a ~${fmtKm(km)} de ${lastName}`
+    }
+  }
+
+  return (
+    <div className={s.routeView}>
+      <div className={s.routeTop}>
+        {nextStop
+          ? <span>Siguiente punto: <strong>{nextStop.name || `Parada ${nextIdx + 1}`}</strong>
+              {nextStop.scheduled_arrival && <> · Llegada prog. <strong>{fmtDateTime(nextStop.scheduled_arrival)}</strong></>}</span>
+          : <span>Todas las paradas completadas</span>}
+      </div>
+
+      <div className={s.routeScroll}>
+        <div className={s.routeTrack}>
+          {stops.map((p, i) => {
+            const cls = done[i] ? s.stopDone : i === nextIdx ? s.stopNext : s.stopPending
+            const isLast = i === stops.length - 1
+            const hasVeh = !isLast && seg?.index === i
+            const fill = !isLast && done[i + 1] ? 100 : hasVeh && seg ? Math.round(seg.t * 100) : 0
+            const mins = isLast ? 0 : minutesBetween(p.scheduled_arrival, stops[i + 1].scheduled_arrival)
+            return (
+              <Fragment key={i}>
+                <div className={s.stopCol}>
+                  <span className={`${s.stopCircle} ${cls}`}>{p.stop_order || i + 1}</span>
+                  <span className={s.stopName} title={p.name}>{p.name || `Parada ${i + 1}`}</span>
+                  {p.scheduled_arrival && (
+                    <span className={s.stopTime}>{i === 0 ? 'Salida' : 'Llegada'} {fmtDateTime(p.scheduled_arrival)}</span>
+                  )}
+                </div>
+
+                {!isLast && (
+                  <div className={`${s.seg} ${hasVeh ? s.segVeh : ''}`}>
+                    <div className={s.segTrack}>
+                      <div className={`${s.segFill} ${done[i + 1] ? s.fillDone : s.fillNext}`} style={{ width: `${fill}%` }} />
+                      {hasVeh && <span className={s.segDot} style={{ left: `${fill}%` }} title="Vehículo" />}
+                    </div>
+                    <span className={s.segLabel} title="Distancia en línea recta · tiempo planeado entre paradas">
+                      ~{fmtKm(haversineKm(pts[i], pts[i + 1]))}{mins > 0 && ` · ${fmtDuration(mins)}`}
+                    </span>
+                    {hasVeh && seg && (
+                      <div className={s.segInfo}>
+                        <span>A ~{fmtKm(seg.kmPrev)} del punto anterior</span>
+                        <span>A ~{fmtKm(seg.kmNext)} del siguiente punto</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </Fragment>
+            )
+          })}
+        </div>
+      </div>
+
+      {note && <div className={s.routeNote}>{note}</div>}
+    </div>
+  )
+}
+
+// ── Panel de mapa (recibe las paradas ya cargadas) ─────────────────────────────
+function TripMapView({ trip, stops, loadingStops }: { trip: Trip; stops: Stop[] | null; loadingStops: boolean }) {
 
   const hasPos = trip.lastLatitude !== null && trip.lastLongitude !== null
   if (!hasPos) {
@@ -245,12 +441,16 @@ function TripMapView({ trip, token }: { trip: Trip; token: string | null }) {
   }
 
   const center: [number, number] = [trip.lastLatitude!, trip.lastLongitude!]
-  const polyline: [number, number][] = stops && stops.length > 0
-    ? [...stops.map(p => [p.lat, p.lng] as [number, number]), center]
-    : []
+  // La línea de ruta une SOLO las paradas; el vehículo se mueve aparte sobre el mapa
+  const polyline: [number, number][] = stops ? stops.map(p => [p.lat, p.lng] as [number, number]) : []
+
+  // El "status" de /stops es de puntualidad (on_time, late…), no indica si ya se visitó.
+  // Una parada cuenta como hecha si el status lo dice, o si está entre las primeras
+  // `doneStops` del viaje (el contador viene de GET /monitoring).
+  const isDone = (p: Stop, i: number) => isStopDone(p, i, trip.doneStops)
 
   // Next stop: first stop not done
-  const nextStop = stops?.find(p => p.status !== 'done' && p.status !== 'completed')
+  const nextStop = stops?.find((p, i) => !isDone(p, i))
 
   return (
     <div className={s.mapWrapper}>
@@ -282,25 +482,27 @@ function TripMapView({ trip, token }: { trip: Trip; token: string | null }) {
               attribution='© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
             />
 
-            {/* Paradas numeradas */}
-            {stops?.map((p, i) => (
-              <Marker
-                key={i}
-                position={[p.lat, p.lng]}
-                icon={makeStopIcon(p.stop_order || i + 1, p.status === 'done' || p.status === 'completed')}
-              />
-            ))}
+            <FitAll points={[...(stops?.map(p => [p.lat, p.lng] as [number, number]) ?? []), center]} />
 
-            {/* Línea de ruta */}
+            {/* Línea de ruta: contorno blanco + línea de color para que resalte */}
             {polyline.length > 1 && (
-              <Polyline
-                positions={polyline}
-                pathOptions={{ color: '#22c55e', weight: 3, opacity: 0.85 }}
-              />
+              <>
+                <Polyline positions={polyline} pathOptions={{ color: '#ffffff', weight: 9, opacity: 0.9 }} />
+                <Polyline positions={polyline} pathOptions={{ color: ROUTE_COLOR, weight: 5, opacity: 1 }} />
+              </>
             )}
 
+            {/* Paradas numeradas (hover: nombre · click: zoom) */}
+            {stops?.map((p, i) => (
+              <StopMarker key={i} stop={p} index={i} done={isDone(p, i)} />
+            ))}
+
             {/* Vehículo */}
-            <Marker position={center} icon={vehicleIcon} />
+            <Marker position={center} icon={vehicleIcon} zIndexOffset={2000} interactive={false}>
+              <Tooltip permanent direction="bottom" offset={[0, 24]}>
+                Vehículo{trip.lastSpeedKmh !== null && ` · ${trip.lastSpeedKmh} km/h`}
+              </Tooltip>
+            </Marker>
           </MapContainer>
         )
       }
@@ -348,8 +550,9 @@ function Detail({ label, children }: { label: string; children: React.ReactNode 
   )
 }
 
-function TripRow({ trip, open, onToggle, token }: { trip: Trip; open: boolean; onToggle: () => void; token: string | null }) {
+function TripRow({ trip, open, onToggle, token, refreshKey }: { trip: Trip; open: boolean; onToggle: () => void; token: string | null; refreshKey: number }) {
   const [detailTab, setDetailTab] = useState<'map' | 'route'>('map')
+  const { stops, loading: loadingStops } = useTripStops(trip.id, trip.doneStops, token, open, refreshKey)
   const meta = statusMeta(trip.status)
   const risk = riskTone(trip.riskScore)
   const atRisk = trip.status === 'at_risk'
@@ -405,6 +608,17 @@ function TripRow({ trip, open, onToggle, token }: { trip: Trip; open: boolean; o
             </div>
             <span className={s.riskNum}>{progress}%</span>
           </div>
+          {trip.hideInMin !== null && (
+            <span
+              className={`${s.closedNote} ${trip.tripStatus === 'cancelled' ? s.closedRed : s.closedGreen}`}
+              title="Los viajes terminados o cancelados se quitan de esta lista pasados 30 minutos"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" />
+              </svg>
+              {fmtHideIn(trip.hideInMin)}
+            </span>
+          )}
         </div>
 
         {/* Protocolo */}
@@ -478,10 +692,12 @@ function TripRow({ trip, open, onToggle, token }: { trip: Trip; open: boolean; o
 
           {/* Contenido de la pestaña activa */}
           {detailTab === 'map' && (
-            <TripMapView trip={trip} token={token} />
+            <TripMapView trip={trip} stops={stops} loadingStops={loadingStops} />
           )}
 
           {detailTab === 'route' && (
+            <>
+            <RouteTimeline trip={trip} stops={stops} loading={loadingStops} />
             <div className={s.panel}>
               <Detail label="Ruta">{trip.routeName || '—'}</Detail>
               <Detail label="Paradas">
@@ -500,8 +716,9 @@ function TripRow({ trip, open, onToggle, token }: { trip: Trip; open: boolean; o
                   : 'Sin posición reportada'}
               </Detail>
               <Detail label="Fase">{trip.phase ? statusMeta(trip.phase).label : '—'}</Detail>
-              <Detail label="Estado del viaje">{trip.tripStatus === 'scheduled' ? 'Programado' : trip.tripStatus === 'in_progress' ? 'En curso' : trip.tripStatus || '—'}</Detail>
+              <Detail label="Estado del viaje">{TRIP_STATUS_LABEL[trip.tripStatus] ?? (trip.tripStatus || '—')}</Detail>
             </div>
+            </>
           )}
         </div>
       )}
@@ -564,6 +781,10 @@ export default function MonitoringContent() {
     return () => { ctrlRef.current?.abort(); clearInterval(id); document.removeEventListener('visibilitychange', onVisible) }
   }, [load])
 
+  // Refresco manual: recarga la lista y también las paradas de las filas abiertas
+  const [refreshKey, setRefreshKey] = useState(0)
+  const handleManualRefresh = () => { setRefreshKey(k => k + 1); load(true) }
+
   // Opciones de los filtros, tomadas de los propios viajes
   const options = useMemo(() => {
     const list = trips ?? []
@@ -613,11 +834,26 @@ export default function MonitoringContent() {
           </p>
         </div>
 
-        <div className={s.chips} aria-label="Resumen de viajes">
-          <span className={s.chip}><i className={`${s.dot} ${s.dot_red}`} />En riesgo: <b>{summary.atRisk}</b></span>
-          <span className={s.chip}><i className={`${s.dot} ${s.dot_green}`} />Logístico: <b>{summary.logistic}</b></span>
-          <span className={s.chip}><i className={`${s.dot} ${s.dot_amber}`} />Pendientes: <b>{summary.pending}</b></span>
-          <span className={s.chip}>Viajes activos: <b>{summary.active}</b></span>
+        <div className={s.headerRight}>
+          <div className={s.chips} aria-label="Resumen de viajes">
+            <span className={s.chip}><i className={`${s.dot} ${s.dot_red}`} />En riesgo: <b>{summary.atRisk}</b></span>
+            <span className={s.chip}><i className={`${s.dot} ${s.dot_green}`} />Logístico: <b>{summary.logistic}</b></span>
+            <span className={s.chip}><i className={`${s.dot} ${s.dot_amber}`} />Pendientes: <b>{summary.pending}</b></span>
+            <span className={s.chip}>Viajes activos: <b>{summary.active}</b></span>
+          </div>
+          <button
+            type="button"
+            className={s.refreshBtn}
+            onClick={handleManualRefresh}
+            disabled={refreshing}
+            title="Actualizar ahora"
+          >
+            <svg className={refreshing ? s.spin : ''} width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" />
+              <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M8 16H3v5" />
+            </svg>
+            {refreshing ? 'Actualizando…' : 'Actualizar'}
+          </button>
         </div>
       </header>
 
@@ -676,7 +912,7 @@ export default function MonitoringContent() {
       )}
       {visible.length > 0 && (
         <ul className={s.list}>
-          {visible.map(t => <TripRow key={t.id} trip={t} open={open.has(t.id)} onToggle={() => toggle(t.id)} token={token} />)}
+          {visible.map(t => <TripRow key={t.id} trip={t} open={open.has(t.id)} onToggle={() => toggle(t.id)} token={token} refreshKey={refreshKey} />)}
         </ul>
       )}
     </div>
