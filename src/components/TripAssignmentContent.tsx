@@ -6,7 +6,7 @@ import f  from './TripAssignmentForm.module.css'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type TripStatus = 'scheduled' | 'in_progress' | 'completed' | 'cancelled' | string
-type Modal = 'none' | 'create' | 'delete' | 'start'
+type Modal = 'none' | 'create' | 'delete'
 
 interface Trip {
   trip_id: string
@@ -125,12 +125,11 @@ const IconPhone  = () => <svg {...P}><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19
 const IconShield = () => <svg {...P}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
 const IconPlate  = () => <svg {...P}><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M18 10h.01M8 14h8"/></svg>
 const IconPin    = () => <svg {...P} width={14} height={14}><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
-const IconPlay   = () => <svg {...P} width={15} height={15}><polygon points="5 3 19 12 5 21 5 3"/></svg>
 
 // ── Selector con buscador ─────────────────────────────────────────────────────
 interface SelectOption { key: string; label: string; meta?: string; disabled?: boolean; tag?: string }
 
-function SearchSelect({ labelId, icon, placeholder, searchLabel, selectedKey, selectedLabel, options, emptyText, onSelect }: {
+function SearchSelect({ labelId, icon, placeholder, searchLabel, selectedKey, selectedLabel, options, emptyText, onSelect, disabled = false }: {
   labelId: string
   icon: React.ReactNode
   placeholder: string
@@ -140,6 +139,7 @@ function SearchSelect({ labelId, icon, placeholder, searchLabel, selectedKey, se
   options: SelectOption[]
   emptyText: string
   onSelect: (key: string) => void
+  disabled?: boolean
 }) {
   const [open, setOpen]   = useState(false)
   const [query, setQuery] = useState('')
@@ -168,12 +168,14 @@ function SearchSelect({ labelId, icon, placeholder, searchLabel, selectedKey, se
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-labelledby={labelId}
+        disabled={disabled}
+        style={disabled ? { opacity: 0.55, cursor: 'not-allowed' } : undefined}
         onClick={() => { setOpen(o => !o); setQuery('') }}
       >
         <span className={selectedLabel ? undefined : f.comboPlaceholder}>{selectedLabel || placeholder}</span>
       </button>
 
-      {open && (
+      {open && !disabled && (
         <div className={f.panel}>
           <div className={f.panelSearch}>
             <span className={f.inputIcon}><IconSearch /></span>
@@ -229,6 +231,9 @@ export default function TripAssignmentContent() {
   const [routeOptions,     setRouteOptions]     = useState<RouteOption[]>([])
   const [driverOptions,    setDriverOptions]    = useState<DriverOption[]>([])
   const [vehicleOptions,   setVehicleOptions]   = useState<VehicleOption[]>([])
+  const [vehiclesLoading, setVehiclesLoading] = useState(false)
+  const [vehiclesError,   setVehiclesError]   = useState<string | null>(null)
+  const vehiclesReqRef = useRef(0)   // descarta respuestas viejas si se cambia de ruta rápido
   const [protocolOptions,  setProtocolOptions]  = useState<ProtocolOption[]>([])
   const [waypointsLoading, setWaypointsLoading] = useState(false)
   const [waypointsError,   setWaypointsError]   = useState<string | null>(null)
@@ -295,16 +300,6 @@ export default function TripAssignmentContent() {
     } catch { setProtocolOptions([]) }
 
     try {
-      const res  = await fetch(`${API}/vehicles`, { headers })
-      const json = await res.json().catch(() => ({}))
-      const raw: Record<string, unknown>[] = Array.isArray(json.data) ? json.data : []
-      setVehicleOptions(raw.map(v => ({
-        vehicle_name: String(v.vehicle_name ?? '').trim(),
-        plate:        String(v.plate ?? '').trim(),
-      })).filter(v => v.vehicle_name))
-    } catch { setVehicleOptions([]) }
-
-    try {
       const res  = await fetch(`${API}/drivers`, { headers })
       const json = await res.json().catch(() => ({}))
       const raw: Record<string, unknown>[] = Array.isArray(json.data) ? json.data : []
@@ -317,6 +312,31 @@ export default function TripAssignmentContent() {
         available:       Boolean(d.available ?? true),
       })))
     } catch { setDriverOptions([]) }
+  }
+
+  // Vehículos disponibles para la ruta elegida: GET /vehicles/{route_id}
+  const fetchVehiclesForRoute = async (routeId: string) => {
+    const reqId = ++vehiclesReqRef.current
+    setVehicleOptions([]); setVehiclesError(null)
+    if (!routeId) { setVehiclesLoading(false); return }
+    setVehiclesLoading(true)
+    try {
+      const res  = await fetch(`${API}/vehicles/${encodeURIComponent(routeId)}`, { headers: { Authorization: `Bearer ${token}` } })
+      const json = res.status === 204 ? null : await res.json().catch(() => null)
+      if (reqId !== vehiclesReqRef.current) return
+      if (!res.ok) throw new Error('No se pudieron cargar los vehículos de la ruta')
+      const raw: Record<string, unknown>[] = Array.isArray(json?.data) ? json.data : []
+      setVehicleOptions(raw.map(v => ({
+        vehicle_name: String(v.vehicle_name ?? '').trim(),
+        plate:        String(v.plate ?? '').trim(),
+      })).filter(v => v.vehicle_name))
+    } catch (e: unknown) {
+      if (reqId !== vehiclesReqRef.current) return
+      setVehicleOptions([])
+      setVehiclesError(e instanceof Error ? e.message : 'Error al cargar los vehículos')
+    } finally {
+      if (reqId === vehiclesReqRef.current) setVehiclesLoading(false)
+    }
   }
 
   const fetchRouteWaypoints = async (routeId: string) => {
@@ -376,14 +396,20 @@ export default function TripAssignmentContent() {
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000) }
 
-  const [startError, setStartError] = useState<string | null>(null)
-
-  const openCreate = () => { setForm(EMPTY_FORM); setFormError(null); setWaypointsError(null); setModal('create'); fetchCatalogs() }
+  const openCreate = () => {
+    setForm(EMPTY_FORM); setFormError(null); setWaypointsError(null)
+    vehiclesReqRef.current++; setVehicleOptions([]); setVehiclesError(null); setVehiclesLoading(false)
+    setModal('create'); fetchCatalogs()
+  }
   const closeModal = () => setModal('none')
   const openDelete = (t: Trip) => { setSelected(t); setDeleteError(null); setModal('delete') }
-  const openStart  = (t: Trip) => { setSelected(t); setStartError(null); setModal('start') }
 
-  const handleRouteChange = (id: string) => { setForm(f => ({ ...f, route_id: id })); fetchRouteWaypoints(id) }
+  const handleRouteChange = (id: string) => {
+    // Cambiar de ruta invalida el vehículo elegido: la lista depende de la ruta
+    setForm(f => ({ ...f, route_id: id, vehicle_name: '', vehicle_plate: '' }))
+    fetchRouteWaypoints(id)
+    fetchVehiclesForRoute(id)
+  }
   const updateStop = (i: number, patch: Partial<Pick<Stop, 'dwell_time' | 'expected_arrival'>>) =>
     setForm(f => ({ ...f, stops: f.stops.map((s, j) => j === i ? { ...s, ...patch } : s) }))
 
@@ -391,6 +417,7 @@ export default function TripAssignmentContent() {
     if (!form.route_id) { setFormError('Selecciona una ruta'); return }
     if (!form.folio.trim()) { setFormError('Escribe el folio del viaje'); return }
     if (!form.scheduled_departure) { setFormError('Indica la salida programada'); return }
+    if (vehiclesLoading) { setFormError('Espera a que terminen de cargar los vehículos de la ruta'); return }
     if (!selectedVehicle) { setFormError('Selecciona un vehículo'); return }
     if (!selectedVehicle.plate) { setFormError('El vehículo seleccionado no tiene placa registrada'); return }
     if (!selectedDriver) { setFormError('Selecciona un operador'); return }
@@ -449,25 +476,6 @@ export default function TripAssignmentContent() {
       await fetchTrips(); closeModal(); showToast('Asignación eliminada correctamente')
     } catch { setDeleteError('Ocurrió un error al intentar eliminar la asignación.') }
     finally { setSubmitting(false) }
-  }
-
-  const handleStartTrip = async () => {
-    if (!selected) return
-    setSubmitting(true); setStartError(null)
-    try {
-      const res = await fetch(`${API}/trip-assigment/${selected.trip_id}/status`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ trip_status: 'in_progress' }),
-      })
-      if (!res.ok) {
-        const body = await res.json().catch(() => null) as { detail?: string } | null
-        throw new Error(body?.detail ?? 'No se pudo iniciar el viaje')
-      }
-      await fetchTrips(); closeModal(); showToast('Viaje iniciado correctamente')
-    } catch (e: unknown) {
-      setStartError(e instanceof Error ? e.message : 'Error al iniciar el viaje')
-    } finally { setSubmitting(false) }
   }
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -558,11 +566,6 @@ export default function TripAssignmentContent() {
                   {isAdmin && (
                     <td>
                       <div className={ui.actions}>
-                        {trip.status === 'scheduled' && (
-                          <button className={`${ui.action} ${ui.actionStart}`} title="Iniciar viaje" onClick={() => openStart(trip)}>
-                            <IconPlay />
-                          </button>
-                        )}
                         {trip.status === 'in_progress' && (
                           <span className={`${ui.badge} ${ui.badgeInProgress}`} style={{ fontSize: 11, padding: '3px 8px' }}>
                             En curso
@@ -653,23 +656,33 @@ export default function TripAssignmentContent() {
                       />
                     </div>
 
-                    {/* Vehículo (catálogo de /vehicles) */}
+                    {/* Vehículo (catálogo de /vehicles/{route_id}) */}
                     <div className={f.field}>
                       <span className={f.label} id="trip-vehicle-label">Vehículo<span className={f.req}>*</span></span>
                       <SearchSelect
                         labelId="trip-vehicle-label"
                         icon={<IconTruck />}
-                        placeholder="Selecciona un vehículo"
+                        placeholder={
+                          !form.route_id ? 'Primero selecciona una ruta'
+                          : vehiclesLoading ? 'Cargando vehículos…'
+                          : 'Selecciona un vehículo'
+                        }
                         searchLabel="Buscar vehículo"
                         selectedKey={selectedVehicle ? vehicleKey(selectedVehicle) : ''}
                         selectedLabel={selectedVehicle?.vehicle_name ?? ''}
                         options={vehicleSelectOptions}
-                        emptyText="No hay vehículos registrados"
+                        emptyText="Esta ruta no tiene vehículos disponibles"
+                        disabled={!form.route_id || vehiclesLoading}
                         onSelect={key => {
                           const v = vehicleOptions.find(x => vehicleKey(x) === key)
                           if (v) setForm(p => ({ ...p, vehicle_name: v.vehicle_name, vehicle_plate: v.plate }))
                         }}
                       />
+                      {!form.route_id && <p className={f.hint}>Selecciona una ruta para ver sus vehículos.</p>}
+                      {form.route_id && vehiclesError && <p className={f.error}>{vehiclesError}</p>}
+                      {form.route_id && !vehiclesLoading && !vehiclesError && vehicleOptions.length === 0 && (
+                        <p className={f.hint}>Esta ruta no tiene vehículos disponibles.</p>
+                      )}
                     </div>
 
                     <div className={f.field}>
@@ -856,42 +869,6 @@ export default function TripAssignmentContent() {
                   display:'flex', alignItems:'center', gap:6 }}
                 onClick={handleDelete} disabled={submitting}
               >{submitting ? 'Eliminando…' : <><IconTrash /> Eliminar</>}</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Modal: Iniciar viaje ── */}
-      {modal === 'start' && isAdmin && selected && (
-        <div className={m.overlay} onClick={e => e.target === e.currentTarget && closeModal()}>
-          <div className={`${m.dialog} ${m.dialogSm}`}>
-            <div className={m.header}>
-              <div>
-                <h2 className={m.title}>Iniciar viaje</h2>
-                <p className={m.subtitle}>El viaje pasará a estado "En curso" y no podrá revertirse.</p>
-              </div>
-              <button className={m.close} onClick={closeModal}><IconClose /></button>
-            </div>
-            <div className={m.body}>
-              {startError && <p className={m.error}>{startError}</p>}
-              <p style={{ color:'#cbd5e1', margin:0 }}>
-                ¿Confirmas que deseas iniciar el viaje{' '}
-                <strong style={{ color:'#f1f5f9' }}>#{selected.display_id}</strong>
-                {selected.route !== '—' && <> — {selected.route}</>}?
-              </p>
-            </div>
-            <div className={m.footer}>
-              <button
-                style={{ background:'transparent', border:'1px solid #334155', color:'#94a3b8',
-                  borderRadius:8, padding:'8px 18px', cursor:'pointer', fontSize:14 }}
-                onClick={closeModal} disabled={submitting}
-              >Cancelar</button>
-              <button
-                style={{ background:'#16a34a', color:'#fff', border:'none', borderRadius:8,
-                  padding:'8px 20px', cursor:'pointer', fontSize:14, fontWeight:600,
-                  display:'flex', alignItems:'center', gap:6, opacity: submitting ? 0.7 : 1 }}
-                onClick={handleStartTrip} disabled={submitting}
-              >{submitting ? 'Iniciando…' : <><IconPlay /> Iniciar viaje</>}</button>
             </div>
           </div>
         </div>

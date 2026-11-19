@@ -234,7 +234,10 @@ form.formDialog { max-width: 780px; }
 .rowClickable { cursor: pointer; }
 .rowClickable:focus-visible { outline: 2px solid #3b82f6; outline-offset: -2px; }
 
-div.detailDialog { max-width: 720px; }
+div.detailDialog {
+  max-width: 980px;   /* ANCHO: súbelo para un modal más ancho */
+  min-height: 560px;  /* ALTO mínimo: agrégalo si lo quieres siempre alto */
+}
 .detailHead { display: flex; align-items: center; gap: 16px; min-width: 0; }
 .detailHeadText { min-width: 0; }
 .detailHeadText h2, .detailHeadText p { overflow: hidden; text-overflow: ellipsis; }
@@ -333,7 +336,7 @@ div.detailDialog { max-width: 720px; }
 
 /* ── Historial de viajes ──────────────────────────────────────────────────── */
 .tripsCard { margin: 0; }
-.tripsScroll { max-height: 340px; overflow: auto; }
+.tripsScroll { max-height: 590px; overflow: auto; }
 .tripsScroll thead th { position: sticky; top: 0; z-index: 1; background: #1a1c1e; }
 .tripFolio { font-weight: 600; color: #60a5fa; white-space: nowrap; }
 .tripVehicle { font-weight: 600; color: #e8eaed; white-space: nowrap; }
@@ -349,3 +352,7 @@ div.detailDialog { max-width: 720px; }
   border: 1px dashed #2a2f36; border-radius: 10px;
 }
 .tripsState p { margin: 0; }
+
+/* Tabla del historial más compacta para que quepa sin scroll horizontal */
+.tripsCard .tripsScroll th,
+.tripsCard .tripsScroll td { padding-left: 16px; padding-right: 16px; }

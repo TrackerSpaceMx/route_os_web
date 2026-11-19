@@ -4,6 +4,7 @@ import { MapContainer, TileLayer, Marker, Polyline, Tooltip, useMap } from 'reac
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import s from './MonitoringContent.module.css'
+import md from './UsersModal.module.css'   // modal de confirmación (mismo diseño que el resto de vistas)
 
 // Fix leaflet default icons
 delete (L.Icon.Default.prototype as any)._getIconUrl
@@ -173,6 +174,18 @@ const TRIP_STATUS_LABEL: Record<string, string> = {
 const fmtHideIn = (min: number) =>
   min <= 1 ? 'Se ocultará en menos de 1 min' : `Se ocultará en ~${min} min`
 
+// Viajes que el usuario quitó manualmente del tablero (se guardan en este navegador)
+const dismissedKey = (username?: string) => `monitoring:dismissed:${username ?? ''}`
+function readDismissed(key: string): Set<string> {
+  try {
+    const arr = JSON.parse(localStorage.getItem(key) ?? '[]')
+    return new Set(Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string') : [])
+  } catch { return new Set() }
+}
+function writeDismissed(key: string, ids: Set<string>) {
+  try { localStorage.setItem(key, JSON.stringify([...ids])) } catch { /* almacenamiento no disponible */ }
+}
+
 function statusMeta(status: string): { label: string; tone: Tone } {
   if (STATUS_META[status]) return STATUS_META[status]
   const label = status.replace(/_/g, ' ')
@@ -190,6 +203,8 @@ const IconChevron = ({ open }: { open: boolean }) => (
 )
 const IconWarn    = () => <svg {...P} width={14} height={14}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><path d="M12 9v4M12 17h.01" /></svg>
 const IconCheck   = () => <svg {...P} width={14} height={14}><circle cx="12" cy="12" r="10" /><path d="m9 12 2 2 4-4" /></svg>
+const IconPlay    = () => <svg {...P} width={15} height={15}><polygon points="5 3 19 12 5 21 5 3" /></svg>
+const IconClose   = () => <svg {...P} width={20} height={20}><path d="M18 6 6 18M6 6l12 12" /></svg>
 const IconAlert   = () => <svg {...P} width={14} height={14}><circle cx="12" cy="12" r="10" /><path d="M12 8v4M12 16h.01" /></svg>
 
 // ── Iconos Leaflet ─────────────────────────────────────────────────────────────
@@ -550,7 +565,7 @@ function Detail({ label, children }: { label: string; children: React.ReactNode 
   )
 }
 
-function TripRow({ trip, open, onToggle, token, refreshKey }: { trip: Trip; open: boolean; onToggle: () => void; token: string | null; refreshKey: number }) {
+function TripRow({ trip, open, onToggle, token, refreshKey, canStart, onStart, onDismiss }: { trip: Trip; open: boolean; onToggle: () => void; token: string | null; refreshKey: number; canStart: boolean; onStart: (t: Trip) => void; onDismiss: (id: string) => void }) {
   const [detailTab, setDetailTab] = useState<'map' | 'route'>('map')
   const { stops, loading: loadingStops } = useTripStops(trip.id, trip.doneStops, token, open, refreshKey)
   const meta = statusMeta(trip.status)
@@ -609,6 +624,7 @@ function TripRow({ trip, open, onToggle, token, refreshKey }: { trip: Trip; open
             <span className={s.riskNum}>{progress}%</span>
           </div>
           {trip.hideInMin !== null && (
+            <div className={s.closedRow}>
             <span
               className={`${s.closedNote} ${trip.tripStatus === 'cancelled' ? s.closedRed : s.closedGreen}`}
               title="Los viajes terminados o cancelados se quitan de esta lista pasados 30 minutos"
@@ -618,6 +634,17 @@ function TripRow({ trip, open, onToggle, token, refreshKey }: { trip: Trip; open
               </svg>
               {fmtHideIn(trip.hideInMin)}
             </span>
+            <button
+              type="button"
+              className={s.hideBtn}
+              title="Quitar este viaje del tablero ahora"
+              aria-label={`Quitar el viaje ${trip.folio} del tablero`}
+              onClick={() => onDismiss(trip.id)}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+              Quitar
+            </button>
+            </div>
           )}
         </div>
 
@@ -646,6 +673,17 @@ function TripRow({ trip, open, onToggle, token, refreshKey }: { trip: Trip; open
 
         {/* Acciones */}
         <div className={`${s.cell} ${s.actions}`}>
+          {canStart && trip.tripStatus === 'scheduled' && (
+            <button
+              type="button"
+              className={s.startBtn}
+              title="Iniciar viaje"
+              aria-label={`Iniciar viaje ${trip.folio}`}
+              onClick={() => onStart(trip)}
+            >
+              <IconPlay />
+            </button>
+          )}
           <span className={`${s.pill} ${trip.onSchedule ? s.tone_green : s.tone_red}`}>
             {trip.onSchedule ? <IconCheck /> : <IconAlert />}
             {trip.onSchedule ? 'Cumple' : 'Incumple'}
@@ -728,7 +766,8 @@ function TripRow({ trip, open, onToggle, token, refreshKey }: { trip: Trip; open
 
 // ── Pantalla ───────────────────────────────────────────────────────────────────
 export default function MonitoringContent() {
-  const { token } = useAuth()
+  const { token, user } = useAuth()
+  const isAdmin = user?.role === 'admin'
 
   const [trips,   setTrips]   = useState<Trip[] | null>(null)
   const [summary, setSummary] = useState<Summary>({ active: 0, atRisk: 0, logistic: 0, pending: 0 })
@@ -745,6 +784,24 @@ export default function MonitoringContent() {
   const [fQuery,  setFQuery]  = useState('')
 
   const ctrlRef = useRef<AbortController | null>(null)
+
+  // Viajes quitados manualmente del tablero
+  const storageKey = dismissedKey(user?.username)
+  const [dismissed, setDismissed] = useState<Set<string>>(() => readDismissed(storageKey))
+  const dismissTrip = (id: string) => setDismissed(prev => {
+    const next = new Set(prev); next.add(id); writeDismissed(storageKey, next); return next
+  })
+  // Limpia las marcas de viajes que el backend ya dejó de enviar
+  useEffect(() => {
+    if (!trips) return
+    const ids = new Set(trips.map(t => t.id))
+    setDismissed(prev => {
+      const next = new Set([...prev].filter(id => ids.has(id)))
+      if (next.size === prev.size) return prev
+      writeDismissed(storageKey, next)
+      return next
+    })
+  }, [trips, storageKey])
 
   const load = useCallback(async (isRefresh = false) => {
     // Cancelar petición anterior si todavía está en vuelo
@@ -785,6 +842,37 @@ export default function MonitoringContent() {
   const [refreshKey, setRefreshKey] = useState(0)
   const handleManualRefresh = () => { setRefreshKey(k => k + 1); load(true) }
 
+  // ── Iniciar viaje (antes en Asignación de Viajes) ─────────────────────────────
+  const [startTrip,  setStartTrip]  = useState<Trip | null>(null)
+  const [starting,   setStarting]   = useState(false)
+  const [startError, setStartError] = useState<string | null>(null)
+  const [toast,      setToast]      = useState<string | null>(null)
+
+  const openStart  = (t: Trip) => { setStartTrip(t); setStartError(null) }
+  const closeStart = () => { if (!starting) { setStartTrip(null); setStartError(null) } }
+
+  const handleStartTrip = async () => {
+    if (!startTrip) return
+    setStarting(true); setStartError(null)
+    try {
+      const res = await fetch(`${API}/trip-assigment/${startTrip.id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ trip_status: 'in_progress' }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => null) as { detail?: string } | null
+        throw new Error(body?.detail ?? 'No se pudo iniciar el viaje')
+      }
+      setStartTrip(null)
+      setToast('Viaje iniciado correctamente')
+      setTimeout(() => setToast(null), 3000)
+      load(true)
+    } catch (e: unknown) {
+      setStartError(e instanceof Error ? e.message : 'Error al iniciar el viaje')
+    } finally { setStarting(false) }
+  }
+
   // Opciones de los filtros, tomadas de los propios viajes
   const options = useMemo(() => {
     const list = trips ?? []
@@ -804,6 +892,7 @@ export default function MonitoringContent() {
   const visible = useMemo(() => {
     const q = fQuery.trim().toLowerCase()
     return (trips ?? []).filter(t =>
+      !dismissed.has(t.id) &&
       (!fClient || t.clientId === fClient) &&
       (!fPlate  || t.vehiclePlate === fPlate) &&
       (!fDriver || t.driverId === fDriver) &&
@@ -812,8 +901,9 @@ export default function MonitoringContent() {
       (!q || [t.folio, t.vehiclePlate, t.vehicleName, t.driverName, t.employeeNumber, t.routeName]
                .some(v => v.toLowerCase().includes(q)))
     )
-  }, [trips, fClient, fPlate, fDriver, fStatus, fDate, fQuery])
+  }, [trips, dismissed, fClient, fPlate, fDriver, fStatus, fDate, fQuery])
 
+  const activeCount = (trips ?? []).filter(t => !dismissed.has(t.id)).length
   const hasFilters = !!(fClient || fPlate || fDriver || fStatus || fDate || fQuery)
   const clearFilters = () => { setFClient(''); setFPlate(''); setFDriver(''); setFStatus(''); setFDate(''); setFQuery('') }
   const toggle = (id: string) => setOpen(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
@@ -898,13 +988,13 @@ export default function MonitoringContent() {
 
       {/* Lista */}
       {trips === null && !error && <p className={s.empty}>Cargando viajes…</p>}
-      {trips !== null && trips.length === 0 && (
+      {trips !== null && activeCount === 0 && (
         <div className={s.empty}>
           <strong>No hay viajes activos</strong>
           <span>Cuando se asigne un viaje, aparecerá aquí.</span>
         </div>
       )}
-      {trips !== null && trips.length > 0 && visible.length === 0 && (
+      {trips !== null && activeCount > 0 && visible.length === 0 && (
         <div className={s.empty}>
           <strong>Ningún viaje coincide con los filtros</strong>
           {hasFilters && <button type="button" className={s.linkBtn} onClick={clearFilters}>Limpiar filtros</button>}
@@ -912,8 +1002,55 @@ export default function MonitoringContent() {
       )}
       {visible.length > 0 && (
         <ul className={s.list}>
-          {visible.map(t => <TripRow key={t.id} trip={t} open={open.has(t.id)} onToggle={() => toggle(t.id)} token={token} refreshKey={refreshKey} />)}
+          {visible.map(t => <TripRow key={t.id} trip={t} open={open.has(t.id)} onToggle={() => toggle(t.id)} token={token} refreshKey={refreshKey} canStart={isAdmin} onStart={openStart} onDismiss={dismissTrip} />)}
         </ul>
+      )}
+
+      {/* ── Modal: Iniciar viaje ── */}
+      {startTrip && isAdmin && (
+        <div className={md.overlay} onMouseDown={e => { if (e.target === e.currentTarget) closeStart() }}>
+          <div className={`${md.dialog} ${md.dialogSm}`} role="alertdialog" aria-modal="true" aria-labelledby="start-trip-title">
+            <div className={md.header}>
+              <div>
+                <h2 id="start-trip-title" className={md.title}>Iniciar viaje</h2>
+                <p className={md.subtitle}>El viaje pasará a estado "En curso" y no podrá revertirse.</p>
+              </div>
+              <button type="button" className={md.close} aria-label="Cerrar" onClick={closeStart} disabled={starting}><IconClose /></button>
+            </div>
+            <div className={md.body}>
+              {startError && <p className={md.error} role="alert">{startError}</p>}
+              <p className={md.message}>
+                ¿Confirmas que deseas iniciar el viaje <strong>{startTrip.folio}</strong>
+                {startTrip.routeName && <> — {startTrip.routeName}</>}
+                {startTrip.driverName && <> con <strong>{startTrip.driverName}</strong></>}?
+              </p>
+            </div>
+            <div className={md.footer}>
+              <button type="button" className={`${md.btn} ${md.btnGhost}`} onClick={closeStart} disabled={starting}>Cancelar</button>
+              <button
+                type="button"
+                className={`${md.btn} ${md.btnPrimary}`}
+                style={{ background: '#16a34a', display: 'flex', alignItems: 'center', gap: 6, opacity: starting ? 0.7 : 1 }}
+                onClick={handleStartTrip}
+                disabled={starting}
+              >
+                {starting ? 'Iniciando…' : <><IconPlay /> Iniciar viaje</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Toast ── */}
+      {toast && (
+        <div role="status" style={{
+          position: 'fixed', bottom: 24, right: 24, zIndex: 9999,
+          background: '#16a34a', color: '#fff',
+          padding: '12px 20px', borderRadius: 10,
+          fontWeight: 500, fontSize: 14, boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
+        }}>
+          ✓ {toast}
+        </div>
       )}
     </div>
   )
